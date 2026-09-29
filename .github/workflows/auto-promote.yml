@@ -1,0 +1,61 @@
+name: Auto Promote PR
+
+on:
+  pull_request:
+    branches: [develop]
+    types: [closed]
+
+permissions:
+  pull-requests: write
+  contents: read
+
+jobs:
+  promote:
+    name: Open PR for next environment
+    runs-on: ubuntu-latest
+    if: github.event.pull_request.merged == true
+
+    steps:
+      - name: Create promotion PR
+        uses: actions/github-script@v9
+        with:
+          script: |
+            const source = context.payload.pull_request.base.ref;
+            const next   = source === 'develop' ? 'main' : null;
+
+            if (!next) {
+              core.info(`No promotion configured for branch: ${source}`);
+              return;
+            }
+
+            const existing = await github.rest.pulls.list({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              head: `${context.repo.owner}:${source}`,
+              base: next,
+              state: 'open',
+            });
+
+            if (existing.data.length > 0) {
+              core.info(`PR already open: ${existing.data[0].html_url}`);
+              return;
+            }
+
+            const pr = await github.rest.pulls.create({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              title: `promote: ${source} → ${next}`,
+              head: source,
+              base: next,
+              body: [
+                `**📦 Promoção automática**`,
+                `Gerado automaticamente após merge em \`${source}\`.`,
+                ``,
+                `**🔁 Fluxo**`,
+                `\`\`\``,
+                `feature/* → develop → main`,
+                `\`\`\``,
+              ].join('\n'),
+            });
+
+            core.info(`PR criado: ${pr.data.html_url}`);

@@ -1,0 +1,99 @@
+name: Branch Policy Enforcement
+
+on:
+  pull_request:
+    branches: [develop, main]
+    types: [opened, reopened, synchronize]
+  pull_request_review:
+    types: [submitted, dismissed]
+
+permissions:
+  pull-requests: write
+  contents: read
+
+jobs:
+  validate:
+    name: Validate Branch Routing
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Enforce branch routing and review policy
+        uses: actions/github-script@v9
+        with:
+          script: |
+            const pr = context.payload.pull_request
+              ?? (await github.rest.pulls.get({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  pull_number: context.payload.review.pull_request.number,
+                })).data;
+
+            const source    = pr.head.ref;
+            const target    = pr.base.ref;
+            const prNumber  = pr.number;
+
+            // ── 1. Routing validation ────────────────────────────────────────
+            let routingViolation = null;
+
+            if (target === 'develop' && !source.startsWith('feature/')) {
+              routingViolation = [
+                `PRs para \`develop\` só são aceitos de branches que começam com \`feature/\`.`,
+                ``,
+                `**Branch de origem:** \`${source}\``,
+                ``,
+                `Renomeie sua branch para \`feature/<descrição>\` e abra um novo PR.`,
+              ].join('\n');
+            }
+
+            if (target === 'main' && source !== 'develop') {
+              routingViolation = [
+                `PRs para \`main\` só são aceitos vindos de \`develop\`.`,
+                ``,
+                `**Branch de origem:** \`${source}\``,
+              ].join('\n');
+            }
+
+            if (routingViolation) {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: prNumber,
+                body: [
+                  `## ❌ Política de branches violada`,
+                  ``,
+                  routingViolation,
+                  ``,
+                  `---`,
+                  `**Fluxo obrigatório:**`,
+                  `\`\`\``,
+                  `feature/* → develop → main`,
+                  `\`\`\``,
+                ].join('\n'),
+              });
+
+              await github.rest.pulls.update({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                pull_number: prNumber,
+                state: 'closed',
+              });
+
+              core.setFailed(`[BLOCKED] ${source} → ${target} violates branch routing policy.`);
+              return;
+            }
+
+            // ── 2. Review check (informativo, não bloqueia) ──────────────────
+            const reviews = await github.rest.pulls.listReviews({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              pull_number: prNumber,
+            });
+
+            const approvals = reviews.data.filter(r => r.state === 'APPROVED');
+
+            if (approvals.length === 0) {
+              core.notice(`PR #${prNumber} ainda sem aprovação — lembrete não bloqueante. `
+                + `A exigência de review é aplicada pela proteção de branch, não por este check.`);
+            }
+
+            core.info(`Branch policy OK — ${source} → ${target} | Approvals: ${approvals.length}`);

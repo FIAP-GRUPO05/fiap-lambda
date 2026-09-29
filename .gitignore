@@ -1,0 +1,26 @@
+# Zips gerados pelo archive_file no terraform apply
+build/
+
+# Terraform
+.terraform/
+*.tfstate
+*.tfstate.*
+.terraform.tfstate.lock.info
+crash.log
+*.tfvars
+!*.tfvars.example
+override.tf
+override.tf.json
+*_override.tf
+*_override.tf.json
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+*.pem
+# Chave privada do JWT (gerada por keys/generate-keys.py)
+keys/*.pem
+
+# Dependências da layer (montadas com pip, ver README)
+layer/python/
