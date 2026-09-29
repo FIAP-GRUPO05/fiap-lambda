@@ -18,3 +18,4 @@ override.tf.json
 __pycache__/
 *.pyc
 .venv/
+*.pem
