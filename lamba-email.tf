@@ -1,6 +1,6 @@
 data "archive_file" "lambda_email_zip" {
   type        = "zip"
-  source_file = "${path.module}/email/main.py"
+  source_file = "${path.module}/codeemail/main.py"
   output_path = "${path.module}/build/lambda-email.zip"
 }
 
