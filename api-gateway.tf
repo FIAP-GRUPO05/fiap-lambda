@@ -66,6 +66,12 @@ resource "aws_apigatewayv2_route" "login" {
   target    = "integrations/${aws_apigatewayv2_integration.token.id}"
 }
 
+resource "aws_apigatewayv2_route" "customer_login" {
+  api_id    = aws_apigatewayv2_api.this.id
+  route_key = "POST /auth/customer"
+  target    = "integrations/${aws_apigatewayv2_integration.token.id}"
+}
+
 
 locals {
   public_api_routes = [
