@@ -54,8 +54,11 @@ jobs:
       - name: terraform fmt
         run: terraform -chdir=$TF_DIR fmt -check -recursive
 
+      # O validate avalia o filemd5() do s3.tf, então o arquivo precisa existir. Vazio
+      # basta: aqui nada é aplicado, e a chave real só é gravada no job deploy.
       - name: terraform validate
         run: |
+          touch keys/private.pem
           terraform -chdir=$TF_DIR init -backend=false -input=false
           terraform -chdir=$TF_DIR validate
 
