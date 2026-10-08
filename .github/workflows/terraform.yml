@@ -1,0 +1,156 @@
+name: Terraform
+
+# Ordem entre os repositórios:
+#   apply:   fiap-k8s → fiap-database → fiap-lambda
+#   destroy: fiap-lambda → fiap-database → fiap-k8s
+#
+# Este repositório é o último no apply e o primeiro no destroy.
+# Com o secret DISPATCH_TOKEN, um workflow_dispatch com "chain" (ou um repository_dispatch
+# vindo do repositório anterior) dispara o próximo da fila ao terminar.
+
+on:
+  pull_request:
+    branches: [develop, main]
+  push:
+    branches: [develop, main]
+  workflow_dispatch:
+    inputs:
+      action:
+        description: "apply ou destroy"
+        type: choice
+        options: [apply, destroy]
+        default: apply
+      chain:
+        description: "Disparar o próximo repositório ao terminar"
+        type: boolean
+        default: true
+  repository_dispatch:
+    types: [apply, destroy]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: terraform-${{ github.repository }}
+  cancel-in-progress: false
+
+env:
+  AWS_REGION: us-east-1
+  TF_DIR: "."
+  NEXT_ON_APPLY: ""
+  NEXT_ON_DESTROY: fiap-database
+
+jobs:
+  validate:
+    name: Validate
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_wrapper: false
+
+      - name: terraform fmt
+        run: terraform -chdir=$TF_DIR fmt -check -recursive
+
+      # O validate avalia o filemd5() do s3.tf, então o arquivo precisa existir. Vazio
+      # basta: aqui nada é aplicado, e a chave real só é gravada no job deploy.
+      - name: terraform validate
+        run: |
+          touch keys/private.pem
+          terraform -chdir=$TF_DIR init -backend=false -input=false
+          terraform -chdir=$TF_DIR validate
+
+  deploy:
+    name: Deploy (${{ github.event.inputs.action || github.event.action || 'apply' }})
+    needs: validate
+    # develop (homologação) para no validate: o Learner Lab comporta um ambiente só.
+    if: >-
+      (github.event_name == 'push' && github.ref == 'refs/heads/main') ||
+      github.event_name == 'workflow_dispatch' ||
+      github.event_name == 'repository_dispatch'
+    runs-on: ubuntu-latest
+    env:
+      ACTION: ${{ github.event.inputs.action || github.event.action || 'apply' }}
+      CHAIN: ${{ github.event_name == 'repository_dispatch' || github.event.inputs.chain == 'true' }}
+      TF_IN_AUTOMATION: "true"
+      TF_VAR_db_password: ${{ secrets.POSTGRES_PASSWORD }}
+      TF_VAR_remetente_email: ${{ secrets.REMETENTE_EMAIL }}
+      TF_VAR_remetente_senha: ${{ secrets.REMETENTE_SENHA }}
+      TF_VAR_destinatario_email: ${{ secrets.DESTINATARIO_EMAIL }}
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_wrapper: false
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v5
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-session-token: ${{ secrets.AWS_SESSION_TOKEN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      # As libs da layer têm partes compiladas: wheels de Linux x86_64 para o runtime 3.11.
+      - name: Montar a layer
+        run: |
+          pip install -r requirements.txt -t layer/python \
+            --platform manylinux2014_x86_64 --only-binary=:all: \
+            --python-version 3.11 --implementation cp
+
+      # A chave privada não vai para o git. Tem que ser o par do keys/jwks.json commitado.
+      - name: Gravar keys/private.pem
+        env:
+          JWT_PRIVATE_KEY: ${{ secrets.JWT_PRIVATE_KEY }}
+        run: |
+          if [ -z "$JWT_PRIVATE_KEY" ]; then
+            echo "::error::Secret JWT_PRIVATE_KEY não configurado (conteúdo de keys/private.pem)."
+            exit 1
+          fi
+          printf '%s\n' "$JWT_PRIVATE_KEY" > keys/private.pem
+
+      # O nome do bucket depende da conta (que muda a cada Learner Lab), por isso entra
+      # pelo -backend-config e não no backend.tf. Em conta nova o bucket ainda não existe.
+      - name: terraform init
+        run: |
+          BUCKET="fiap-tfstate-$(aws sts get-caller-identity --query Account --output text)"
+          aws s3api head-bucket --bucket "$BUCKET" 2>/dev/null || aws s3api create-bucket --bucket "$BUCKET" --region "$AWS_REGION"
+          terraform -chdir=$TF_DIR init -input=false \
+            -backend-config="bucket=$BUCKET" \
+            -backend-config="key=fiap/lambda.tfstate" \
+            -backend-config="region=$AWS_REGION" \
+            -backend-config="encrypt=true"
+
+      - name: terraform apply
+        if: env.ACTION == 'apply'
+        working-directory: ${{ env.TF_DIR }}
+        run: |
+          terraform apply -auto-approve -input=false
+          echo "### API Gateway: $(terraform output -raw api_gateway_url)" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: terraform destroy
+        if: env.ACTION == 'destroy'
+        working-directory: ${{ env.TF_DIR }}
+        run: terraform destroy -auto-approve -input=false
+
+      - name: Disparar o próximo repositório
+        env:
+          GH_TOKEN: ${{ secrets.DISPATCH_TOKEN }}
+        if: env.CHAIN == 'true'
+        run: |
+          if [ "$ACTION" = "destroy" ]; then NEXT="$NEXT_ON_DESTROY"; else NEXT="$NEXT_ON_APPLY"; fi
+          if [ -z "$NEXT" ]; then
+            echo "Último repositório da fila para '$ACTION'."
+          elif [ -z "$GH_TOKEN" ]; then
+            echo "::warning::Sem o secret DISPATCH_TOKEN; rode o $NEXT manualmente."
+          else
+            gh api "repos/${{ github.repository_owner }}/$NEXT/dispatches" -f event_type="$ACTION"
+            echo "Disparado: $NEXT ($ACTION)"
+          fi

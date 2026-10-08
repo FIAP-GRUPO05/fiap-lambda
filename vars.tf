@@ -30,7 +30,8 @@ variable "vpc_name" {
 
 variable "db_host" {
   type        = string
-  description = "Hostname do Load Balancer interno do Postgres (service postgres-internal do fiap-database)"
+  default     = ""
+  description = "Hostname do Load Balancer interno do Postgres. Vazio lê o output db_host do state do fiap-database"
 
   validation {
     condition     = !can(regex("://|/|:", var.db_host))
@@ -46,11 +47,13 @@ variable "db_port" {
 
 variable "db_name" {
   type        = string
+  default     = "oficina_db"
   description = "Nome do banco (mesmo postgresDb do fiap-database)"
 }
 
 variable "db_user" {
   type        = string
+  default     = "oficina"
   description = "Usuário do banco (mesmo postgresUser do fiap-database)"
 }
 
@@ -81,5 +84,6 @@ variable "jwt_exp_seconds" {
 
 variable "api_url" {
   type        = string
-  description = "URL do Load Balancer da API (output api_public_url do fiap-k8s), ex.: http://xxx.elb.amazonaws.com:8080"
+  default     = ""
+  description = "URL do Load Balancer da API, ex.: http://xxx.elb.amazonaws.com:8080. Vazio lê o output api_public_url do state do fiap-k8s"
 }

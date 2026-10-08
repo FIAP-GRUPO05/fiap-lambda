@@ -50,7 +50,7 @@ resource "aws_lambda_function" "this" {
 
   environment {
     variables = {
-      DB_HOST         = var.db_host
+      DB_HOST         = local.db_host
       DB_PORT         = var.db_port
       DB_NAME         = var.db_name
       DB_USER         = var.db_user
@@ -65,4 +65,11 @@ resource "aws_lambda_function" "this" {
   }
 
   depends_on = [aws_vpc_endpoint.s3]
+
+  lifecycle {
+    precondition {
+      condition     = local.db_host != ""
+      error_message = "db_host vazio: o Load Balancer do postgres-internal ainda não tem hostname. Aplique o fiap-database de novo em alguns minutos ou preencha db_host."
+    }
+  }
 }
