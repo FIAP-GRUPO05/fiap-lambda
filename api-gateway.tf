@@ -51,10 +51,17 @@ resource "aws_apigatewayv2_integration" "api" {
   api_id             = aws_apigatewayv2_api.this.id
   integration_type   = "HTTP_PROXY"
   integration_method = "ANY"
-  integration_uri    = var.api_url
+  integration_uri    = local.api_url
 
   request_parameters = {
     "overwrite:path" = "$request.path"
+  }
+
+  lifecycle {
+    precondition {
+      condition     = local.api_url != ""
+      error_message = "api_url vazio: o Load Balancer da API ainda não tem hostname. Aplique o fiap-k8s de novo em alguns minutos ou preencha api_url."
+    }
   }
 }
 

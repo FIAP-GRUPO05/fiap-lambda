@@ -2,11 +2,8 @@ remetente_email    = "voce@gmail.com"
 remetente_senha    = "senha-de-app-do-gmail"
 destinatario_email = "destino@exemplo.com"
 
-# kubectl -n prod get svc postgres-internal -o jsonpath='{.status.loadBalancer.ingress[0].hostname}'
-db_host     = "internal-xxxx.us-east-1.elb.amazonaws.com"
-db_name     = "oficina_db"
-db_user     = "oficina"
 db_password = "troque-esta-senha"
 
-# terraform output api_public_url (no fiap-k8s)
-api_url = "http://xxxx.us-east-1.elb.amazonaws.com:8080"
+# Opcionais: vazios, vêm dos outputs db_host (fiap-database) e api_public_url (fiap-k8s)
+# db_host = "internal-xxxx.us-east-1.elb.amazonaws.com"
+# api_url = "http://xxxx.us-east-1.elb.amazonaws.com:8080"
