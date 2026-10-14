@@ -19,3 +19,8 @@ __pycache__/
 *.pyc
 .venv/
 *.pem
+# Chave privada do JWT (gerada por keys/generate-keys.py)
+keys/*.pem
+
+# Dependências da layer (montadas com pip, ver README)
+layer/python/

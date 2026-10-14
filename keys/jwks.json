@@ -1,0 +1,12 @@
+{
+  "keys": [
+    {
+      "kty": "RSA",
+      "use": "sig",
+      "alg": "RS256",
+      "kid": "fiap-key-1",
+      "n": "wYEZC4-rPwi69s4CIrXxxTO3bw3sBhbpFxhCm1x-d_7-7zb2bU2_wmkrLxQYJ82f3zww1OJJiAGIUWelPlXcDrp5qUhwmDG7eHwevRXMHt17zNmj9L-Ph6wQEWB9wsLpH_lQ0IlewhvMdO1-yqQ0eMU4xWRB17RCFExs0z7z1Q1quAAcoWYzbYXuQ8vv4ysDWPNzVO03f3OYEM-6i-YF-KgVGK9MWefgMO0PyPFCWuNDZ8-K3VXCFvCC3khJzLlZ_nDjZQ-zlZOt6462Aap5o1bfLY9IfDNPbJFvi-LC2iba_LW4tGsLg1TN8LvKMO9xfa__ObYDTaq9_qq0t6LHfQ",
+      "e": "AQAB"
+    }
+  ]
+}
