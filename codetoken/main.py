@@ -9,6 +9,11 @@ import boto3
 import jwt
 import psycopg2
 
+import logging
+
+logger = logging.getLogger()
+logger.setLevel(os.getenv("LOG_LEVEL", "INFO"))
+
 s3 = boto3.client("s3")
 _private_key = None
 _connection = None
@@ -164,7 +169,7 @@ def _login(event):
     password = body.get("password")
     if not email or not password:
         return _response(400, {"message": "'email' e 'password' são obrigatórios"})
-
+    logger.info("(1) - Login recebido para %s ", email)
     user = _find_user(email)
 
     if user is None or not bcrypt.checkpw(password.encode("utf-8"), user[1].encode("utf-8")):
