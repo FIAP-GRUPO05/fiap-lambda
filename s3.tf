@@ -16,7 +16,7 @@ resource "terraform_data" "keys_bucket" {
 
   provisioner "local-exec" {
     when    = destroy
-    command = "aws s3 rb s3://${self.output} --force"
+    command = "! aws s3api head-bucket --bucket ${self.output} 2>/dev/null || aws s3 rb s3://${self.output} --force"
   }
 }
 
@@ -29,7 +29,7 @@ resource "terraform_data" "jwks_bucket" {
 
   provisioner "local-exec" {
     when    = destroy
-    command = "aws s3 rb s3://${self.output} --force"
+    command = "! aws s3api head-bucket --bucket ${self.output} 2>/dev/null || aws s3 rb s3://${self.output} --force"
   }
 }
 
