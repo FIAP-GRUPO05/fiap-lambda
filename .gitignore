@@ -17,6 +17,7 @@ override.tf.json
 # Python
 __pycache__/
 *.pyc
+.coverage
 .venv/
 *.pem
 # Chave privada do JWT (gerada por keys/generate-keys.py)
