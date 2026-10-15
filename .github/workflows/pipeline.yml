@@ -122,18 +122,38 @@ jobs:
         if: github.event_name == 'pull_request' && github.event.pull_request.base.ref == 'prod'
         run: python -m unittest discover -s tests -v
 
+  propose:
+    name: Propose
+    needs: [route, verify]
+    if: >-
+      always() && github.event_name == 'push' && needs.route.result == 'success' &&
+      (needs.verify.result == 'success' ||
+       (needs.verify.result == 'skipped' &&
+        (startsWith(github.ref_name, 'rollback/') || startsWith(github.ref_name, 'rolback/'))))
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
+    steps:
+      - name: 10 - Checkout da branch enviada
+        uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+      - name: 11 - Abrir PR para develop ou release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: python .github/scripts/flow.py promote
+
   promote:
     name: Promote
     needs: [route, verify]
     if: >-
-      always() && needs.route.result == 'success' &&
+      always() && github.event_name == 'pull_request' && github.event.action == 'closed' &&
+      github.event.pull_request.merged == true && needs.route.result == 'success' &&
       (needs.verify.result == 'success' ||
        (needs.verify.result == 'skipped' &&
-        (startsWith(github.ref_name, 'rollback/') || startsWith(github.ref_name, 'rolback/') ||
-         (github.event_name == 'pull_request' &&
-          (startsWith(github.event.pull_request.head.ref, 'rollback/') || startsWith(github.event.pull_request.head.ref, 'rolback/')))))) &&
-      (github.event_name == 'push' ||
-       (github.event_name == 'pull_request' && github.event.action == 'closed' && github.event.pull_request.merged == true))
+        (startsWith(github.event.pull_request.head.ref, 'rollback/') ||
+         startsWith(github.event.pull_request.head.ref, 'rolback/'))))
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -143,7 +163,7 @@ jobs:
         uses: actions/checkout@v5
         with:
           persist-credentials: false
-          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.base.ref || 'develop' }}
+          ref: ${{ github.event.pull_request.base.ref }}
       - name: 11 - Abrir PR da próxima etapa
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
