@@ -15,6 +15,9 @@ data "aws_route_tables" "eks" {
   vpc_id = data.aws_vpc.main.id
 }
 
+data "aws_prefix_list" "s3" {
+  name = "com.amazonaws.${var.region}.s3"
+}
 
 resource "aws_vpc_endpoint" "s3" {
   vpc_id            = data.aws_vpc.main.id
