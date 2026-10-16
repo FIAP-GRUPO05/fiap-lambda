@@ -149,9 +149,21 @@ jobs:
         uses: actions/checkout@v5
         with:
           persist-credentials: false
+      - name: 10a - Criar token do GitHub App da organizacao
+        if: vars.FIAP_PROMOTION_APP_CLIENT_ID != ''
+        id: promotion-token
+        uses: actions/create-github-app-token@v3
+        with:
+          client-id: ${{ vars.FIAP_PROMOTION_APP_CLIENT_ID }}
+          private-key: ${{ secrets.FIAP_PROMOTION_APP_PRIVATE_KEY }}
+          permission-contents: write
+          permission-pull-requests: write
+      - name: 10b - Avisar sobre aprovacao manual da esteira
+        if: vars.FIAP_PROMOTION_APP_CLIENT_ID == ''
+        run: echo '::warning::Configure o GitHub App de promocao para que PRs gerados automaticamente iniciem a esteira sem aprovacao manual.'
       - name: 11 - Abrir PR para develop ou release
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ steps.promotion-token.outputs.token || secrets.GITHUB_TOKEN }}
         run: python .github/scripts/flow.py promote
 
   promote:
@@ -174,7 +186,19 @@ jobs:
         with:
           persist-credentials: false
           ref: ${{ github.event.pull_request.base.ref }}
+      - name: 10a - Criar token do GitHub App da organizacao
+        if: vars.FIAP_PROMOTION_APP_CLIENT_ID != ''
+        id: promotion-token
+        uses: actions/create-github-app-token@v3
+        with:
+          client-id: ${{ vars.FIAP_PROMOTION_APP_CLIENT_ID }}
+          private-key: ${{ secrets.FIAP_PROMOTION_APP_PRIVATE_KEY }}
+          permission-contents: write
+          permission-pull-requests: write
+      - name: 10b - Avisar sobre aprovacao manual da esteira
+        if: vars.FIAP_PROMOTION_APP_CLIENT_ID == ''
+        run: echo '::warning::Configure o GitHub App de promocao para que PRs gerados automaticamente iniciem a esteira sem aprovacao manual.'
       - name: 11 - Abrir PR da próxima etapa
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ steps.promotion-token.outputs.token || secrets.GITHUB_TOKEN }}
         run: python .github/scripts/flow.py promote
