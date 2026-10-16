@@ -60,6 +60,7 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: read
+      id-token: write
     steps:
       - name: 01 - Checkout
         uses: actions/checkout@v5
@@ -114,6 +115,16 @@ jobs:
       - name: 06 - Conectividade externa simulada
         if: github.event_name == 'pull_request' && github.event.pull_request.base.ref != 'develop'
         run: python .github/scripts/mock_external.py
+      - name: 06a - Autenticar na AWS TWM por OIDC
+        if: github.event_name == 'pull_request' && github.event.pull_request.base.ref != 'develop'
+        uses: aws-actions/configure-aws-credentials@v6.3.0
+        with:
+          aws-region: sa-east-1
+          role-to-assume: arn:aws:iam::456687462806:role/fiap-gh-preflight-fiap-lambda
+          allowed-account-ids: '456687462806'
+      - name: 06b - Confirmar identidade AWS
+        if: github.event_name == 'pull_request' && github.event.pull_request.base.ref != 'develop'
+        run: aws sts get-caller-identity --query Arn --output text
 
       - name: 07 - Regressão da configuração
         if: github.event_name == 'pull_request' && github.event.pull_request.base.ref == 'prod'
