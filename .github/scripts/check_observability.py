@@ -1,9 +1,10 @@
-"""Check that both Lambdas have explicit CloudWatch log retention."""
+"""Check explicit CloudWatch log retention for authentication and its gateway."""
 
 from pathlib import Path
+import re
 
-terraform = (Path("observability.tf")).read_text(encoding="utf-8")
-for name in ("lambda-token", "lambda-email"):
-    assert f"/aws/lambda/{name}" in terraform, f"Log group ausente: {name}"
-assert terraform.count("retention_in_days") == 2
-print("CloudWatch log groups e retenção configurados para as duas Lambdas")
+for file, group in (("authentication.tf", "/aws/lambda/fiap-auth-"), ("gateway.tf", "/aws/apigateway/fiap-")):
+    terraform = (Path("infra/managed") / file).read_text(encoding="utf-8")
+    assert group in terraform, f"Log group ausente em {file}"
+    assert re.search(r"retention_in_days\s*=\s*14\b", terraform), f"Retencao ausente em {file}"
+print("CloudWatch com retencao explicita para autenticacao e API Gateway nos tres ambientes")

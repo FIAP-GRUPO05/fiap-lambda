@@ -38,9 +38,9 @@ def route(source, target):
 def bump(version, title, labels):
     major, minor, patch = version
     names = {str(label).lower() for label in labels}
-    if "breaking" in names or re.search(r"\bBREAKING CHANGE\b|^[a-z]+!:", title, re.I):
+    if "breaking" in names or re.search(r"\bBREAKING CHANGE\b|^[a-z]+(?:\([^)]+\))?!:", title, re.I | re.M):
         return major + 1, 0, 0
-    if "semver:minor" in names or re.match(r"^feat(?:\(.+\))?:", title, re.I):
+    if "semver:minor" in names or re.search(r"^feat(?:\(.+\))?:", title, re.I | re.M):
         return major, minor + 1, 0
     return major, minor, patch + 1
 
@@ -132,6 +132,16 @@ def promote(event_name, ref, event):
                 raise RuntimeError("Rollback direto só é permitido enquanto prod estiver à frente de main")
             release = active_release()
             open_pr(ref, release, f"rollback: {ref} → {release}")
+        elif ref == "develop" or RELEASE.fullmatch(ref) or ref == "prod":
+            if event.get("created"):
+                return
+            candidates = request("GET", f"commits/{event['after']}/pulls?per_page=100")
+            merged = [item for item in candidates if item.get("merged_at") and
+                      item["base"]["ref"] == ref and item.get("merge_commit_sha") == event["after"]]
+            if not merged:
+                raise RuntimeError("Promocao de ambiente exige push originado por merge de um PR aprovado")
+            merged_pr = {**merged[0], "merged": True}
+            return promote("pull_request", ref, {"action": "closed", "pull_request": merged_pr})
         return
 
     pr = event["pull_request"]
@@ -140,7 +150,11 @@ def promote(event_name, ref, event):
     source, target = pr["head"]["ref"], pr["base"]["ref"]
     route(source, target)
     if target == "develop":
-        version = bump(release_version(), pr["title"], [label["name"] for label in pr.get("labels", [])])
+        titles = [pr["title"]]
+        if "number" in pr:
+            commits = request("GET", f"pulls/{pr['number']}/commits?per_page=100")
+            titles.extend(item["commit"]["message"] for item in commits)
+        version = bump(release_version(), "\n".join(titles), [label["name"] for label in pr.get("labels", [])])
         release = "release/v" + ".".join(map(str, version))
         ensure_branch(release, "prod" if branch("prod") else "main")
         open_pr("develop", release, f"release: {release}")
