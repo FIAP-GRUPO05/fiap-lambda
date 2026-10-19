@@ -80,3 +80,10 @@ A esteira publica uma versao Lambda, testa JWKS, validacao de CPF e acesso ao
 banco, e promove o alias `live`. Se a verificacao HTTP final falhar, restaura o
 alias anterior. Terraform gerencia a infraestrutura; a esteira gerencia codigo
 e versao do alias. Integrantes nao precisam de chaves AWS locais para contribuir.
+
+
+O merge em prod tambem aplica `infra/managed` antes de publicar o codigo, usando
+`fiap-gh-terraform-fiap-lambda`, restrito a essa branch. Esse modulo gerencia os
+tres API Gateways e a configuracao das funcoes; seus estados e recursos sao
+compartilhados. Codigo e alias continuam promovidos por ambiente.
+Veja [o fluxo completo](docs/CI-CD.md).

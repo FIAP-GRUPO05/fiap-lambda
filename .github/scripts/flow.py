@@ -108,12 +108,18 @@ def release_version():
 
 
 def active_release():
-    pulls = request("GET", "pulls?state=open&base=prod&per_page=100")
-    versions = [(tuple(map(int, match.groups())), item["head"]["ref"])
-                for item in pulls if (match := RELEASE.fullmatch(item["head"]["ref"]))]
-    if not versions:
-        raise RuntimeError("Rollback exige um PR release/vX.Y.Z → prod aberto")
-    return max(versions)[1]
+    production = branch("prod")
+    if not production:
+        raise RuntimeError("Rollback exige uma branch prod existente")
+    sha = production["commit"]["sha"]
+    pulls = request("GET", f"commits/{sha}/pulls?per_page=100")
+    releases = [item["head"]["ref"] for item in pulls
+                if item.get("merged_at") and item["base"]["ref"] == "prod"
+                and item.get("merge_commit_sha") == sha
+                and RELEASE.fullmatch(item["head"]["ref"])]
+    if not releases or not branch(releases[0]):
+        raise RuntimeError("Rollback exige a release do PR que originou o commit atual de prod; preserve essa branch ate integrar prod em main")
+    return releases[0]
 
 
 def pending_prod():
