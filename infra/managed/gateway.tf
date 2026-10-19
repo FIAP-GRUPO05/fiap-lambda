@@ -45,7 +45,7 @@ locals {
   }
   public_routes = {
     for item in setproduct(local.environments, toset([
-      "GET /", "POST /auth/register", "POST /auth/register-account", "GET /actuator/health",
+      "GET /", "POST /auth/register-account", "GET /actuator/health",
       "GET /actuator/health/{proxy+}", "GET /swagger-ui.html", "GET /swagger-ui/{proxy+}",
       "GET /v3/api-docs", "GET /v3/api-docs/{proxy+}",
       "GET /service-orders/{id}/budget", "GET /service-orders/{id}/budget/decision",
@@ -136,6 +136,16 @@ resource "aws_apigatewayv2_route" "protected" {
   target             = "integrations/${aws_apigatewayv2_integration.backend[each.key].id}"
   authorization_type = "JWT"
   authorizer_id      = aws_apigatewayv2_authorizer.jwt[each.key].id
+}
+
+resource "aws_apigatewayv2_route" "staff_registration" {
+  for_each             = var.enable_backend_proxy ? local.environments : toset([])
+  api_id               = aws_apigatewayv2_api.environment[each.key].id
+  route_key            = "POST /auth/register"
+  target               = "integrations/${aws_apigatewayv2_integration.backend[each.key].id}"
+  authorization_type   = "JWT"
+  authorizer_id        = aws_apigatewayv2_authorizer.jwt[each.key].id
+  authorization_scopes = ["staff:manage"]
 }
 
 output "runtime_config" {
