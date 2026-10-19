@@ -127,9 +127,12 @@ jobs:
           scan-ref: .
           severity: HIGH,CRITICAL
           exit-code: '1'
-      - name: 06 - Conectividade externa simulada
+      - name: 06 - Conectividade externa real
         if: github.event_name == 'pull_request' && github.event.pull_request.base.ref != 'develop'
-        run: python .github/scripts/mock_external.py
+        env:
+          FIAP_RUNTIME_CONFIG: ${{ vars.FIAP_RUNTIME_CONFIG }}
+          SOURCE_BRANCH: ${{ github.event.pull_request.head.ref }}
+        run: python .github/scripts/verify_external.py
       - name: 07 - Regressão da configuração
         if: github.event_name == 'pull_request' && github.event.pull_request.base.ref == 'prod'
         run: terraform -chdir=infra/managed validate
