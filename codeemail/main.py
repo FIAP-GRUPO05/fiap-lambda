@@ -5,7 +5,6 @@ from email.mime.multipart import MIMEMultipart
 
 
 def lambda_handler(event, context):
-    print(event)
     smtp_server = os.getenv("SMTP_SERVER", "smtp.gmail.com")
     smtp_port = int(os.getenv("SMTP_PORT", "587"))
     remetente = os.getenv("REMETENTE_EMAIL")
