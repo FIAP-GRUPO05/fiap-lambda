@@ -196,18 +196,38 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
-      - name: Autenticar no papel do ambiente
-        uses: aws-actions/configure-aws-credentials@v6.3.0
-        with:
-          aws-region: sa-east-1
-          role-to-assume: arn:aws:iam::456687462806:role/fiap-gh-deploy-fiap-lambda-${{ steps.target.outputs.environment }}
-          allowed-account-ids: '456687462806'
       - name: Empacotar para o runtime Linux da AWS
         shell: bash
         run: |
           python -m pip install --platform manylinux_2_34_x86_64 --platform manylinux_2_28_x86_64 --platform manylinux2014_x86_64 --implementation cp --python-version 3.12 --only-binary=:all: --no-compile --target build/token-package -r requirements.txt
           cp codetoken/main.py build/token-package/main.py
           python -c "import shutil; shutil.make_archive('build/token', 'zip', 'build/token-package')"
+      - name: Autenticar para Terraform da infraestrutura compartilhada
+        if: github.ref_name == 'prod'
+        uses: aws-actions/configure-aws-credentials@v6.3.0
+        with:
+          aws-region: sa-east-1
+          role-to-assume: arn:aws:iam::456687462806:role/fiap-gh-terraform-fiap-lambda
+          allowed-account-ids: '456687462806'
+      - name: Instalar Terraform
+        if: github.ref_name == 'prod'
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_wrapper: false
+      - name: Aplicar gateway e funcoes compartilhadas
+        if: github.ref_name == 'prod'
+        shell: bash
+        run: |
+          terraform -chdir=infra/managed init -backend-config=backend.hcl -input=false
+          terraform -chdir=infra/managed plan -input=false -out=lambda.tfplan
+          terraform -chdir=infra/managed apply -input=false -auto-approve lambda.tfplan
+      - name: Autenticar no papel do ambiente
+        uses: aws-actions/configure-aws-credentials@v6.3.0
+        with:
+          aws-region: sa-east-1
+          role-to-assume: arn:aws:iam::456687462806:role/fiap-gh-deploy-fiap-lambda-${{ steps.target.outputs.environment }}
+          allowed-account-ids: '456687462806'
+          unset-current-credentials: true
       - name: Publicar versao, verificar e promover alias com rollback em falha
         run: python .github/scripts/deploy_lambda.py ${{ steps.target.outputs.environment }} build/token.zip
 
