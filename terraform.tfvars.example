@@ -1,9 +1,0 @@
-remetente_email    = "voce@gmail.com"
-remetente_senha    = "senha-de-app-do-gmail"
-destinatario_email = "destino@exemplo.com"
-
-db_password = "troque-esta-senha"
-
-# Opcionais: vazios, vêm dos outputs db_host (fiap-database) e api_public_url (fiap-k8s)
-# db_host = "internal-xxxx.us-east-1.elb.amazonaws.com"
-# api_url = "http://xxxx.us-east-1.elb.amazonaws.com:8080"
