@@ -53,6 +53,15 @@ class OidcDiscoveryTest(unittest.TestCase):
             client.get_secret_value.assert_called_once_with(SecretId="signing-secret")
             s3.get_object.assert_not_called()
 
+    def test_only_admin_receives_staff_management_scope(self):
+        with patch.object(main, "_get_private_key", return_value=self.pem):
+            for role in ("ROLE_ADMIN", "ADMIN", "ROLE_USER", "CUSTOMER"):
+                response = main._issue_token("subject", role)
+                token = json.loads(response["body"])["accessToken"]
+                claims = jwt.decode(token, self.private.public_key(), algorithms=["RS256"],
+                    audience="fiap-api", issuer="https://issuer.example.test")
+                self.assertEqual(claims.get("scope"), "staff:manage" if role in {"ROLE_ADMIN", "ADMIN"} else None)
+
     def test_invalid_login_types_and_oversized_password_are_rejected_before_database(self):
         for payload in ({"email": 4, "password": "abc"}, {"email": "test@example.test", "password": 4},
                         {"email": "test@example.test", "password": "x" * 73}):

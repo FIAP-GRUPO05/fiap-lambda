@@ -174,6 +174,8 @@ def _issue_token(subject, role, customer_id=None):
     }
     if customer_id is not None:
         claims["customerId"] = str(customer_id)
+    if role.removeprefix("ROLE_") == "ADMIN":
+        claims["scope"] = "staff:manage"
 
     token = jwt.encode(
         claims,
