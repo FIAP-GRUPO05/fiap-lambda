@@ -36,6 +36,29 @@ class PromotionTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             flow.route("feature/atalho", "prod")
 
+    def test_rollback_finds_release_after_its_prod_pr_was_merged(self):
+        deployed = {"merged_at": "2026-01-01", "merge_commit_sha": "deployed",
+                    "head": {"ref": "release/v0.2.0"}, "base": {"ref": "prod"}}
+        pending = {"merged_at": None, "head": {"ref": "release/v0.3.0"}, "base": {"ref": "prod"}}
+        with patch.object(flow, "branch", side_effect=[{"commit": {"sha": "deployed"}}, {"name": "release/v0.2.0"}]), \
+             patch.object(flow, "request", return_value=[pending, deployed]) as request:
+            self.assertEqual(flow.active_release(), "release/v0.2.0")
+            request.assert_called_once_with("GET", "commits/deployed/pulls?per_page=100")
+
+    def test_rollback_does_not_choose_an_unrelated_release(self):
+        unrelated = {"merged_at": "2026-01-01", "merge_commit_sha": "old",
+                     "head": {"ref": "release/v0.1.0"}, "base": {"ref": "prod"}}
+        with patch.object(flow, "branch", return_value={"commit": {"sha": "deployed"}}), \
+             patch.object(flow, "request", return_value=[unrelated]):
+            with self.assertRaises(RuntimeError):
+                flow.active_release()
+
+    def test_rollback_requires_prod_ahead_of_main(self):
+        with patch.object(flow, "pending_prod", return_value=False), patch.object(flow, "open_pr") as opened:
+            with self.assertRaises(RuntimeError):
+                flow.promote("push", "rollback/restaurar", {})
+            opened.assert_not_called()
+
 if __name__ == "__main__":
     unittest.main()
 
