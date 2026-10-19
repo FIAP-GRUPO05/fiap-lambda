@@ -20,7 +20,7 @@ for path in ("/actuator/health", "/.well-known/openid-configuration", "/.well-kn
         raise RuntimeError("Invalid public JWKS")
 with tempfile.TemporaryDirectory() as directory:
     request, response = Path(directory) / "request.json", Path(directory) / "response.json"
-    request.write_text(json.dumps({"environment": environment, "require_apm": True}))
+    request.write_text(json.dumps({"environment": environment, "require_apm": True, "require_uptime": True}))
     metadata = json.loads(subprocess.run(["aws", "lambda", "invoke", "--function-name", "fiap-observability-probe",
         "--cli-binary-format", "raw-in-base64-out", "--payload", f"file://{request}", str(response), "--output", "json"],
         capture_output=True, text=True, check=True).stdout)

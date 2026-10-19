@@ -24,6 +24,16 @@ Route/Verify nas branches de ambiente. Prod e main exigem uma aprovacao e nao
 permitem bypass. O GitHub App abre os PRs e permite que seus eventos iniciem CI.
 O merge de cada etapa continua sendo uma decisao humana.
 
+Somente o GitHub App de promocao pode criar release/* e prod. Uma regra
+separada permite ao App apenas essa criacao; as regras de PR, checks e revisao
+continuam sem bypass. Checks nao sao exigidos no instante de criar a branch a
+partir de main/prod, mas continuam obrigatorios para integrar o PR seguinte.
+
+O rollback deve partir da release associada ao commit atual de prod. Crie
+`rollback/<descricao>` a partir dela e registre os commits de reversao, por
+exemplo com `git revert`; o push abre o PR de volta para essa release. A branch
+de release deve ser preservada ate prod ser integrado em main.
+
 ## Versionamento
 
 A maior release existente define a base do proximo SemVer. `feat:` ou
@@ -78,8 +88,13 @@ validadas no Access Analyzer. A promocao completa entre branches ainda depende
 dos merges humanos dos PRs; os deploys iniciais foram feitos por CLI.
 
 New Relic recebe APM Java, metricas Kubernetes, logs e eventos. Dashboards e
-alertas estao provisionados; disponibilidade usa prontidao dos pods. Um monitor
-externo de jornada HTTPS e notificacoes reais de alerta ainda sao pontos separados.
+alertas estao provisionados. Alem da prontidao dos pods, uma Lambda agendada pelo
+EventBridge verifica health e JWKS das tres URLs HTTPS a cada cinco minutos e
+envia FiapUptimeCheck ao New Relic. Cada ambiente tem alerta de falha HTTPS e
+ausencia de sinal por 15 minutos. O CI confirma o recebimento dessas amostras.
+Os incidentes ficam em Alerts > Issues; a entrega por e-mail/Slack depende de
+definir o destino do time. O monitor verifica disponibilidade, sem executar uma
+jornada autenticada de negocio; essa jornada pertence ao regressivo do deploy.
 E-mail permanece `MAIL_TIPE=NONE`; os testes nao enviam mensagens reais.
 Registros sinteticos de ordens de servico usados na regressao ficam identificados
 pelo UUID da execucao e preservam o historico, inclusive em prod.
