@@ -8,6 +8,7 @@ import bcrypt
 import boto3
 import jwt
 import psycopg2
+from cryptography.hazmat.primitives import serialization
 
 import logging
 
@@ -15,6 +16,7 @@ logger = logging.getLogger()
 logger.setLevel(os.getenv("LOG_LEVEL", "INFO"))
 
 s3 = boto3.client("s3")
+secretsmanager = boto3.client("secretsmanager")
 _private_key = None
 _connection = None
 
@@ -22,22 +24,38 @@ _connection = None
 def _get_private_key():
     global _private_key
     if _private_key is None:
-        obj = s3.get_object(Bucket=os.environ["KEY_BUCKET"], Key=os.environ["KEY_OBJECT"])
-        _private_key = obj["Body"].read()
+        secret_arn = os.getenv("JWT_PRIVATE_KEY_SECRET_ARN")
+        if secret_arn:
+            _private_key = secretsmanager.get_secret_value(SecretId=secret_arn)["SecretString"].encode("utf-8")
+        else:
+            obj = s3.get_object(Bucket=os.environ["KEY_BUCKET"], Key=os.environ["KEY_OBJECT"])
+            _private_key = obj["Body"].read()
     return _private_key
 
 
 def _get_connection():
     global _connection
     if _connection is None or _connection.closed:
-        _connection = psycopg2.connect(
+        secret_arn = os.getenv("DB_SECRET_ARN")
+        if secret_arn:
+            secret = json.loads(secretsmanager.get_secret_value(SecretId=secret_arn)["SecretString"])
+            db_user = secret["username"]
+            db_password = secret["password"]
+        else:
+            db_user = os.environ["DB_USER"]
+            db_password = os.environ["DB_PASSWORD"]
+
+        connection_options = dict(
             host=os.environ["DB_HOST"],
             port=int(os.getenv("DB_PORT", "5432")),
             dbname=os.environ["DB_NAME"],
-            user=os.environ["DB_USER"],
-            password=os.environ["DB_PASSWORD"],
+            user=db_user,
+            password=db_password,
             connect_timeout=5,
         )
+        if secret_arn:
+            connection_options["sslmode"] = "require"
+        _connection = psycopg2.connect(**connection_options)
         _connection.autocommit = True
     return _connection
 
@@ -119,6 +137,20 @@ def _read_body(event):
     return json.loads(body)
 
 
+def _openid_configuration():
+    issuer = os.environ["JWT_ISSUER"]
+    return _response(200, {"issuer": issuer, "jwks_uri": f"{issuer}/.well-known/jwks.json"})
+
+
+def _jwks():
+    private_key = serialization.load_pem_private_key(_get_private_key(), password=None)
+    public_key = jwt.algorithms.RSAAlgorithm.to_jwk(private_key.public_key(), as_dict=True)
+    public_key.update({"kid": os.environ["JWT_KID"], "use": "sig", "alg": "RS256"})
+    response = _response(200, {"keys": [public_key]})
+    response["headers"]["Cache-Control"] = "public, max-age=300"
+    return response
+
+
 def _request_route(event):
     route_key = event.get("routeKey")
     if route_key:
@@ -167,9 +199,10 @@ def _login(event):
 
     email = body.get("email")
     password = body.get("password")
-    if not email or not password:
+    if not isinstance(email, str) or not isinstance(password, str) or not email.strip() or not password:
         return _response(400, {"message": "'email' e 'password' são obrigatórios"})
-    logger.info("(2) - Login recebido para %s ", email)
+    if len(password.encode("utf-8")) > 72:
+        return _response(400, {"message": "Password inválido"})
     user = _find_user(email)
 
     if user is None or not bcrypt.checkpw(password.encode("utf-8"), user[1].encode("utf-8")):
@@ -205,6 +238,10 @@ def _customer_login(event):
 
 def lambda_handler(event, context):
     route = _request_route(event)
+    if route == "GET /.well-known/openid-configuration":
+        return _openid_configuration()
+    if route == "GET /.well-known/jwks.json":
+        return _jwks()
     if route == "POST /auth/customer":
         return _customer_login(event)
     if route in (None, "POST /auth/login"):
