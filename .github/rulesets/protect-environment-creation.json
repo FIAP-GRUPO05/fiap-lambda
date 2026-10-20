@@ -1,0 +1,26 @@
+{
+  "name": "Use feature; release e prod sao criadas pelo pipeline",
+  "target": "branch",
+  "enforcement": "active",
+  "conditions": {
+    "ref_name": {
+      "include": [
+        "refs/heads/release/*",
+        "refs/heads/prod"
+      ],
+      "exclude": []
+    }
+  },
+  "rules": [
+    {
+      "type": "creation"
+    }
+  ],
+  "bypass_actors": [
+    {
+      "actor_id": 5352822,
+      "actor_type": "Integration",
+      "bypass_mode": "always"
+    }
+  ]
+}

@@ -149,6 +149,30 @@ class TokenLambdaTest(unittest.TestCase):
             ("52998224725",),
         )
 
+    def test_database_connection_uses_managed_secret_and_tls(self):
+        connection = MagicMock()
+        secret_arn = "arn:aws:secretsmanager:sa-east-1:456687462806:secret:test"
+        with patch.dict(os.environ, {
+            "DB_SECRET_ARN": secret_arn,
+            "DB_HOST": "database.internal",
+            "DB_NAME": "oficina_db",
+        }), patch.object(main, "_connection", None), patch.object(
+            main.secretsmanager, "get_secret_value",
+            return_value={"SecretString": json.dumps({"username": "oficina", "password": "managed-value"})},
+        ) as get_secret, patch.object(main.psycopg2, "connect", return_value=connection) as connect:
+            self.assertIs(main._get_connection(), connection)
+
+        get_secret.assert_called_once_with(SecretId=secret_arn)
+        connect.assert_called_once_with(
+            host="database.internal",
+            port=5432,
+            dbname="oficina_db",
+            user="oficina",
+            password="managed-value",
+            connect_timeout=5,
+            sslmode="require",
+        )
+
     def test_existing_email_password_admin_login_still_works(self):
         hashed_password = bcrypt.hashpw(b"unit-test-password", bcrypt.gensalt()).decode("utf-8")
         user = ("admin@example.test", hashed_password, "ROLE_ADMIN", None)
