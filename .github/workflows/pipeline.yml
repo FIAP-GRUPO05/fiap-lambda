@@ -1,17 +1,27 @@
 name: Phase 3 Pipeline
-
-on:
-  workflow_dispatch:
+'on':
+  workflow_dispatch: null
   push:
-    branches: ['feature/**', 'rollback/**', 'rolback/**', develop, 'release/**', prod]
+    branches:
+    - feature/**
+    - rollback/**
+    - rolback/**
+    - develop
+    - release/**
+    - prod
   pull_request:
-    branches: [develop, 'release/**', prod, main]
-    types: [opened, reopened, synchronize]
-
+    branches:
+    - develop
+    - release/**
+    - prod
+    - main
+    types:
+    - opened
+    - reopened
+    - synchronize
 concurrency:
   group: pipeline-${{ github.repository }}-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: false
-
 jobs:
   route:
     name: Route
@@ -19,284 +29,324 @@ jobs:
     permissions:
       contents: read
     steps:
-      - name: 00 - Validar a origem e o destino do PR
-        if: github.event_name == 'pull_request'
-        env:
-          HEAD_BRANCH: ${{ github.event.pull_request.head.ref }}
-          BASE_BRANCH: ${{ github.event.pull_request.base.ref }}
-        shell: bash
-        run: |
-          case "$BASE_BRANCH:$HEAD_BRANCH" in
-            develop:feature/*|release/*:develop|release/*:rollback/*|release/*:rolback/*|prod:release/*|main:prod) ;;
-            *) echo "::error::Rota proibida: $HEAD_BRANCH → $BASE_BRANCH. Use feature/* → develop → release/vX.Y.Z → prod → main; rollback/* → release/vX.Y.Z."; exit 1 ;;
-          esac
-          if [[ "$BASE_BRANCH" == release/* && ! "$BASE_BRANCH" =~ ^release/v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-            echo '::error::A release deve ter formato release/vX.Y.Z'; exit 1
-          fi
-          if [[ "$HEAD_BRANCH" == release/* && ! "$HEAD_BRANCH" =~ ^release/v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-            echo '::error::A release deve ter formato release/vX.Y.Z'; exit 1
-          fi
-      - name: 00 - Validar o nome da branch enviada
-        if: github.event_name == 'push'
-        env:
-          SOURCE_BRANCH: ${{ github.ref_name }}
-        shell: bash
-        run: |
-          if [[ ! "$SOURCE_BRANCH" =~ ^(feature|rollback|rolback)/[a-z0-9][a-z0-9._/-]*$ &&
-                "$SOURCE_BRANCH" != develop && "$SOURCE_BRANCH" != prod &&
-                ! "$SOURCE_BRANCH" =~ ^release/v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-            echo '::error::Use feature/<descricao>, rollback/<descricao>, develop, release/vX.Y.Z ou prod.'; exit 1
-          fi
-      - name: 00 - Explicar a promoção simples para main
-        if: github.event_name == 'pull_request' && github.event.pull_request.base.ref == 'main'
-        run: echo 'prod → main é somente um PR com merge manual; nenhuma esteira de build/deploy é executada.'
-
+    - name: 00 - Distinguir manutenção e operação destrutiva
+      id: operation
+      env:
+        FIAP_INFRA_STATE: ${{ vars.FIAP_INFRA_STATE }}
+        SOURCE: ${{ github.event.pull_request.head.ref || github.ref_name }}
+        BASE: ${{ github.event.pull_request.base.ref }}
+        BRANCH: ${{ github.ref_name }}
+      shell: bash
+      run: |
+        set -euo pipefail
+        state="${FIAP_INFRA_STATE:-active}"
+        case "$state" in active|maintenance|destroying|destroyed) ;; *) echo '::error::Estado de infraestrutura inválido'; exit 1 ;; esac
+        maintenance=false
+        if [[ "$state" != active ]]; then maintenance=true; fi
+        operational=false
+        if [[ "$SOURCE" == feature/destroy-infra-aws || "$BASE" == ALL || "$BRANCH" == ALL ]]; then
+          operational=true
+        fi
+        echo "maintenance=$maintenance" >> "$GITHUB_OUTPUT"
+        echo "destroy_request=$operational" >> "$GITHUB_OUTPUT"
+        if [[ "$maintenance" == true ]]; then echo 'Infraestrutura em manutenção/desmontada; deploys e promoções normais bloqueados.'; fi
+        if [[ "$operational" == true ]]; then echo '::error::Solicite destroy no repositório FIAP-GRUPO05/fiap-k8s'; exit 1; fi
+    - name: 00 - Validar a origem e o destino do PR
+      if: github.event_name == 'pull_request'
+      env:
+        HEAD_BRANCH: ${{ github.event.pull_request.head.ref }}
+        BASE_BRANCH: ${{ github.event.pull_request.base.ref }}
+      shell: bash
+      run: |
+        case "$BASE_BRANCH:$HEAD_BRANCH" in
+          develop:feature/*|release/*:develop|release/*:rollback/*|release/*:rolback/*|prod:release/*|main:prod) ;;
+          *) echo "::error::Rota proibida: $HEAD_BRANCH → $BASE_BRANCH. Use feature/* → develop → release/vX.Y.Z → prod → main; rollback/* → release/vX.Y.Z."; exit 1 ;;
+        esac
+        if [[ "$BASE_BRANCH" == release/* && ! "$BASE_BRANCH" =~ ^release/v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+          echo '::error::A release deve ter formato release/vX.Y.Z'; exit 1
+        fi
+        if [[ "$HEAD_BRANCH" == release/* && ! "$HEAD_BRANCH" =~ ^release/v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+          echo '::error::A release deve ter formato release/vX.Y.Z'; exit 1
+        fi
+    - name: 00 - Validar o nome da branch enviada
+      if: github.event_name == 'push'
+      env:
+        SOURCE_BRANCH: ${{ github.ref_name }}
+      shell: bash
+      run: |
+        if [[ ! "$SOURCE_BRANCH" =~ ^(feature|rollback|rolback)/[a-z0-9][a-z0-9._/-]*$ &&
+              "$SOURCE_BRANCH" != develop && "$SOURCE_BRANCH" != prod &&
+              ! "$SOURCE_BRANCH" =~ ^release/v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+          echo '::error::Use feature/<descricao>, rollback/<descricao>, develop, release/vX.Y.Z ou prod.'; exit 1
+        fi
+    - name: 00 - Explicar a promoção simples para main
+      if: github.event_name == 'pull_request' && github.event.pull_request.base.ref == 'main'
+      run: echo 'prod → main é somente um PR com merge manual; nenhuma esteira de build/deploy é executada.'
+    outputs:
+      maintenance: ${{ steps.operation.outputs.maintenance }}
+      destroy_request: ${{ steps.operation.outputs.destroy_request }}
   verify:
     name: Verify
     needs: route
-    if: >-
-      github.event_name == 'push' &&
-      (startsWith(github.ref_name, 'feature/') || !github.event.created &&
+    if: |-
+      (needs.route.outputs.maintenance != 'true' || startsWith(github.ref_name, 'feature/') || github.event.pull_request.base.ref == 'develop') && needs.route.outputs.destroy_request != 'true' && (github.event_name == 'push' && (startsWith(github.ref_name, 'feature/') || !github.event.created &&
        (github.ref_name == 'develop' || startsWith(github.ref_name, 'release/') || github.ref_name == 'prod')) ||
-      github.event_name == 'pull_request' && github.event.pull_request.base.ref != 'main' &&
-      !startsWith(github.event.pull_request.head.ref, 'rollback/') &&
-      !startsWith(github.event.pull_request.head.ref, 'rolback/')
+      github.event_name == 'pull_request' && github.event.pull_request.base.ref != 'main' && !startsWith(github.event.pull_request.head.ref, 'rollback/') && !startsWith(github.event.pull_request.head.ref, 'rolback/'))
     runs-on: ubuntu-latest
     permissions:
       contents: read
       id-token: write
     steps:
-      - name: 01 - Checkout
-        uses: actions/checkout@v5
-        with:
-          persist-credentials: false
-          ref: ${{ github.sha }}
-      - name: Validar rotas de promocao e SemVer
-        run: python -m unittest discover -s .github/scripts -p 'test_*.py' -v
-      - name: 01a - Autenticar na AWS TWM por OIDC
-        if: github.event_name == 'pull_request'
-        uses: aws-actions/configure-aws-credentials@v6.3.0
-        with:
-          aws-region: sa-east-1
-          role-to-assume: arn:aws:iam::456687462806:role/fiap-gh-preflight-fiap-lambda
-          allowed-account-ids: '456687462806'
-      - name: 01b - Confirmar identidade AWS
-        if: github.event_name == 'pull_request'
-        run: aws sts get-caller-identity --query Arn --output text
-      - name: 02 - Python 3.12
-        uses: actions/setup-python@v5
-        with:
-          python-version: '3.12'
-      - name: 03 - Dependências
-        run: python -m pip install -r requirements.txt coverage
-      - name: 04 - Build e testes
-        run: python -m unittest discover -s tests -v
-      - name: 05 - Cobertura mínima de 90%
-        if: github.event_name == 'pull_request' || github.ref_name == 'develop' || startsWith(github.ref_name, 'release/') || github.ref_name == 'prod'
-        run: |
-          coverage run --source=codetoken,codeemail -m unittest discover -s tests
-          coverage report --fail-under=90
-      - name: 06 - Segurança
-        if: github.event_name == 'pull_request' || github.ref_name == 'develop' || startsWith(github.ref_name, 'release/') || github.ref_name == 'prod'
-        uses: aquasecurity/trivy-action@v0.36.0
-        with:
-          scan-type: fs
-          scan-ref: .
-          scanners: vuln,misconfig,secret
-          severity: HIGH,CRITICAL
-          exit-code: '1'
-      - name: 07 - Observabilidade configurada
-        if: github.event_name == 'pull_request' || github.ref_name == 'develop' || startsWith(github.ref_name, 'release/') || github.ref_name == 'prod'
-        run: python .github/scripts/check_observability.py
-      - name: 02 - Terraform
-        uses: hashicorp/setup-terraform@v3
-        with:
-          terraform_wrapper: false
-      - name: 03 - Formatação Terraform
-        run: terraform -chdir=infra/managed fmt -check -recursive
-      - name: 04 - Build Terraform sem backend remoto
-        shell: bash
-        run: |
-          terraform -chdir=infra/managed init -backend=false -input=false
-          terraform -chdir=infra/managed validate
-      - name: 05 - Segurança da infraestrutura
-        if: github.event_name == 'pull_request' || github.ref_name == 'develop' || startsWith(github.ref_name, 'release/') || github.ref_name == 'prod'
-        uses: aquasecurity/trivy-action@v0.36.0
-        with:
-          scan-type: config
-          scan-ref: .
-          severity: HIGH,CRITICAL
-          exit-code: '1'
-      - name: 06 - Conectividade externa real
-        if: github.event_name == 'pull_request' && github.event.pull_request.base.ref != 'develop'
-        env:
-          FIAP_RUNTIME_CONFIG: ${{ vars.FIAP_RUNTIME_CONFIG }}
-          SOURCE_BRANCH: ${{ github.event.pull_request.head.ref }}
-        run: python .github/scripts/verify_external.py
-      - name: 07 - Regressão da configuração
-        if: github.event_name == 'pull_request' && github.event.pull_request.base.ref == 'prod'
-        run: terraform -chdir=infra/managed validate
-      - name: 09 - Regressão dos endpoints Lambda
-        if: github.event_name == 'pull_request' && github.event.pull_request.base.ref == 'prod'
-        run: python -m unittest discover -s tests -v
-
+    - name: 01 - Checkout
+      uses: actions/checkout@v5
+      with:
+        persist-credentials: false
+        ref: ${{ github.sha }}
+    - name: Validar rotas de promocao e SemVer
+      run: python -m unittest discover -s .github/scripts -p 'test_*.py' -v
+    - name: 01a - Autenticar na AWS TWM por OIDC
+      if: github.event_name == 'pull_request'
+      uses: aws-actions/configure-aws-credentials@v6.3.0
+      with:
+        aws-region: sa-east-1
+        role-to-assume: arn:aws:iam::456687462806:role/fiap-gh-preflight-fiap-lambda
+        allowed-account-ids: '456687462806'
+    - name: 01b - Confirmar identidade AWS
+      if: github.event_name == 'pull_request'
+      run: aws sts get-caller-identity --query Arn --output text
+    - name: 02 - Python 3.12
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.12'
+    - name: 03 - Dependências
+      run: python -m pip install -r requirements.txt coverage
+    - name: 04 - Build e testes
+      run: python -m unittest discover -s tests -v
+    - name: 05 - Cobertura mínima de 90%
+      if: github.event_name == 'pull_request' || github.ref_name == 'develop' || startsWith(github.ref_name, 'release/') ||
+        github.ref_name == 'prod'
+      run: |
+        coverage run --source=codetoken,codeemail -m unittest discover -s tests
+        coverage report --fail-under=90
+    - name: 06 - Segurança
+      if: github.event_name == 'pull_request' || github.ref_name == 'develop' || startsWith(github.ref_name, 'release/') ||
+        github.ref_name == 'prod'
+      uses: aquasecurity/trivy-action@v0.36.0
+      with:
+        scan-type: fs
+        scan-ref: .
+        scanners: vuln,misconfig,secret
+        severity: HIGH,CRITICAL
+        exit-code: '1'
+    - name: 07 - Observabilidade configurada
+      if: github.event_name == 'pull_request' || github.ref_name == 'develop' || startsWith(github.ref_name, 'release/') ||
+        github.ref_name == 'prod'
+      run: python .github/scripts/check_observability.py
+    - name: 02 - Terraform
+      uses: hashicorp/setup-terraform@v3
+      with:
+        terraform_wrapper: false
+    - name: 03 - Formatação Terraform
+      run: terraform -chdir=infra/managed fmt -check -recursive
+    - name: 04 - Build Terraform sem backend remoto
+      shell: bash
+      run: |
+        terraform -chdir=infra/managed init -backend=false -input=false
+        terraform -chdir=infra/managed validate
+    - name: 05 - Segurança da infraestrutura
+      if: github.event_name == 'pull_request' || github.ref_name == 'develop' || startsWith(github.ref_name, 'release/') ||
+        github.ref_name == 'prod'
+      uses: aquasecurity/trivy-action@v0.36.0
+      with:
+        scan-type: config
+        scan-ref: .
+        severity: HIGH,CRITICAL
+        exit-code: '1'
+    - name: 06 - Conectividade externa real
+      if: github.event_name == 'pull_request' && github.event.pull_request.base.ref != 'develop'
+      env:
+        FIAP_RUNTIME_CONFIG: ${{ vars.FIAP_RUNTIME_CONFIG }}
+        SOURCE_BRANCH: ${{ github.event.pull_request.head.ref }}
+      run: python .github/scripts/verify_external.py
+    - name: 07 - Regressão da configuração
+      if: github.event_name == 'pull_request' && github.event.pull_request.base.ref == 'prod'
+      run: terraform -chdir=infra/managed validate
+    - name: 09 - Regressão dos endpoints Lambda
+      if: github.event_name == 'pull_request' && github.event.pull_request.base.ref == 'prod'
+      run: python -m unittest discover -s tests -v
   bootstrap-keys:
     name: Bootstrap signing keys
     needs: route
-    if: github.event_name == 'workflow_dispatch'
+    if: needs.route.outputs.maintenance != 'true' && needs.route.outputs.destroy_request != 'true' && (github.event_name ==
+      'workflow_dispatch')
     runs-on: ubuntu-latest
     permissions:
       contents: read
       id-token: write
     steps:
-      - uses: actions/checkout@v5
-        with:
-          persist-credentials: false
-      - uses: actions/setup-python@v5
-        with:
-          python-version: '3.12'
-      - name: Instalar suporte criptografico
-        run: python -m pip install cryptography==50.0.2
-      - name: Autenticar para o bootstrap por OIDC
-        uses: aws-actions/configure-aws-credentials@v6.3.0
-        with:
-          aws-region: sa-east-1
-          role-to-assume: arn:aws:iam::456687462806:role/fiap-gh-bootstrap-fiap-lambda
-          allowed-account-ids: '456687462806'
-      - name: Inicializar chaves isoladas sem exibir valores
-        env:
-          JWT_PRIVATE_KEY: ${{ secrets.JWT_PRIVATE_KEY }}
-        run: python .github/scripts/bootstrap_signing_keys.py
-
+    - uses: actions/checkout@v5
+      with:
+        persist-credentials: false
+    - uses: actions/setup-python@v5
+      with:
+        python-version: '3.12'
+    - name: Instalar suporte criptografico
+      run: python -m pip install cryptography==50.0.2
+    - name: Autenticar para o bootstrap por OIDC
+      uses: aws-actions/configure-aws-credentials@v6.3.0
+      with:
+        aws-region: sa-east-1
+        role-to-assume: arn:aws:iam::456687462806:role/fiap-gh-bootstrap-fiap-lambda
+        allowed-account-ids: '456687462806'
+    - name: Confirmar controle central antes de modificar AWS
+      env:
+        FIAP_INFRA_STATE: ${{ vars.FIAP_INFRA_STATE }}
+      run: python .github/scripts/infra_guard.py
+    - name: Inicializar chaves isoladas sem exibir valores
+      env:
+        JWT_PRIVATE_KEY: ${{ secrets.JWT_PRIVATE_KEY }}
+      run: python .github/scripts/bootstrap_signing_keys.py
   deploy:
     name: Deploy authentication
-    needs: [route, verify]
-    if: >-
-      github.event_name == 'push' && !github.event.created && needs.verify.result == 'success' &&
-      (github.ref_name == 'develop' || startsWith(github.ref_name, 'release/') || github.ref_name == 'prod')
+    needs:
+    - route
+    - verify
+    if: needs.route.outputs.maintenance != 'true' && needs.route.outputs.destroy_request != 'true' && (github.event_name ==
+      'push' && !github.event.created && needs.verify.result == 'success' && (github.ref_name == 'develop' || startsWith(github.ref_name,
+      'release/') || github.ref_name == 'prod'))
     runs-on: ubuntu-latest
     permissions:
       contents: read
       id-token: write
     steps:
-      - uses: actions/checkout@v5
-        with:
-          persist-credentials: false
-      - name: Selecionar ambiente
-        id: target
-        shell: bash
-        run: |
-          case "$GITHUB_REF_NAME" in
-            develop) target=develop ;;
-            release/*) target=homol ;;
-            prod) target=prod ;;
-            *) exit 2 ;;
-          esac
-          echo "environment=$target" >> "$GITHUB_OUTPUT"
-      - uses: actions/setup-python@v5
-        with:
-          python-version: '3.12'
-      - name: Empacotar para o runtime Linux da AWS
-        shell: bash
-        run: |
-          python -m pip install --platform manylinux_2_34_x86_64 --platform manylinux_2_28_x86_64 --platform manylinux2014_x86_64 --implementation cp --python-version 3.12 --only-binary=:all: --no-compile --target build/token-package -r requirements.txt
-          cp codetoken/main.py build/token-package/main.py
-          python -c "import shutil; shutil.make_archive('build/token', 'zip', 'build/token-package')"
-      - name: Autenticar para Terraform da infraestrutura compartilhada
-        if: github.ref_name == 'prod'
-        uses: aws-actions/configure-aws-credentials@v6.3.0
-        with:
-          aws-region: sa-east-1
-          role-to-assume: arn:aws:iam::456687462806:role/fiap-gh-terraform-fiap-lambda
-          allowed-account-ids: '456687462806'
-      - name: Instalar Terraform
-        if: github.ref_name == 'prod'
-        uses: hashicorp/setup-terraform@v3
-        with:
-          terraform_wrapper: false
-      - name: Aplicar gateway e funcoes compartilhadas
-        if: github.ref_name == 'prod'
-        shell: bash
-        run: |
-          terraform -chdir=infra/managed init -backend-config=backend.hcl -input=false
-          terraform -chdir=infra/managed plan -input=false -out=lambda.tfplan
-          terraform -chdir=infra/managed apply -input=false -auto-approve lambda.tfplan
-      - name: Autenticar no papel do ambiente
-        uses: aws-actions/configure-aws-credentials@v6.3.0
-        with:
-          aws-region: sa-east-1
-          role-to-assume: arn:aws:iam::456687462806:role/fiap-gh-deploy-fiap-lambda-${{ steps.target.outputs.environment }}
-          allowed-account-ids: '456687462806'
-          unset-current-credentials: true
-      - name: Publicar versao, verificar e promover alias com rollback em falha
-        run: python .github/scripts/deploy_lambda.py ${{ steps.target.outputs.environment }} build/token.zip
-
+    - uses: actions/checkout@v5
+      with:
+        persist-credentials: false
+    - name: Selecionar ambiente
+      id: target
+      shell: bash
+      run: |
+        case "$GITHUB_REF_NAME" in
+          develop) target=develop ;;
+          release/*) target=homol ;;
+          prod) target=prod ;;
+          *) exit 2 ;;
+        esac
+        echo "environment=$target" >> "$GITHUB_OUTPUT"
+    - uses: actions/setup-python@v5
+      with:
+        python-version: '3.12'
+    - name: Empacotar para o runtime Linux da AWS
+      shell: bash
+      run: |
+        python -m pip install --platform manylinux_2_34_x86_64 --platform manylinux_2_28_x86_64 --platform manylinux2014_x86_64 --implementation cp --python-version 3.12 --only-binary=:all: --no-compile --target build/token-package -r requirements.txt
+        cp codetoken/main.py build/token-package/main.py
+        python -c "import shutil; shutil.make_archive('build/token', 'zip', 'build/token-package')"
+    - name: Autenticar para Terraform da infraestrutura compartilhada
+      if: github.ref_name == 'prod'
+      uses: aws-actions/configure-aws-credentials@v6.3.0
+      with:
+        aws-region: sa-east-1
+        role-to-assume: arn:aws:iam::456687462806:role/fiap-gh-terraform-fiap-lambda
+        allowed-account-ids: '456687462806'
+    - name: Instalar Terraform
+      if: github.ref_name == 'prod'
+      uses: hashicorp/setup-terraform@v3
+      with:
+        terraform_wrapper: false
+    - name: Confirmar controle central antes de modificar AWS
+      env:
+        FIAP_INFRA_STATE: ${{ vars.FIAP_INFRA_STATE }}
+      run: python .github/scripts/infra_guard.py
+      if: github.ref_name == 'prod'
+    - name: Aplicar gateway e funcoes compartilhadas
+      if: github.ref_name == 'prod'
+      shell: bash
+      run: |
+        terraform -chdir=infra/managed init -backend-config=backend.hcl -input=false
+        terraform -chdir=infra/managed plan -input=false -out=lambda.tfplan
+        terraform -chdir=infra/managed apply -input=false -auto-approve lambda.tfplan
+    - name: Autenticar no papel do ambiente
+      uses: aws-actions/configure-aws-credentials@v6.3.0
+      with:
+        aws-region: sa-east-1
+        role-to-assume: arn:aws:iam::456687462806:role/fiap-gh-deploy-fiap-lambda-${{ steps.target.outputs.environment }}
+        allowed-account-ids: '456687462806'
+        unset-current-credentials: true
+    - name: Confirmar controle central antes de modificar AWS
+      env:
+        FIAP_INFRA_STATE: ${{ vars.FIAP_INFRA_STATE }}
+      run: python .github/scripts/infra_guard.py
+    - name: Publicar versao, verificar e promover alias com rollback em falha
+      run: python .github/scripts/deploy_lambda.py ${{ steps.target.outputs.environment }} build/token.zip
   propose:
     name: Propose
-    needs: [route, verify]
-    if: >-
-      always() && github.event_name == 'push' &&
-      (startsWith(github.ref_name, 'feature/') || startsWith(github.ref_name, 'rollback/') || startsWith(github.ref_name, 'rolback/')) &&
-      needs.route.result == 'success' &&
-      (needs.verify.result == 'success' ||
+    needs:
+    - route
+    - verify
+    if: |-
+      (needs.route.outputs.maintenance != 'true' || startsWith(github.ref_name, 'feature/')) && needs.route.outputs.destroy_request != 'true' && (always() && github.event_name == 'push' && (startsWith(github.ref_name, 'feature/') || startsWith(github.ref_name, 'rollback/') || startsWith(github.ref_name, 'rolback/')) && needs.route.result == 'success' && (needs.verify.result == 'success' ||
        (needs.verify.result == 'skipped' &&
-        (startsWith(github.ref_name, 'rollback/') || startsWith(github.ref_name, 'rolback/'))))
+        (startsWith(github.ref_name, 'rollback/') || startsWith(github.ref_name, 'rolback/')))))
     runs-on: ubuntu-latest
     permissions:
       contents: read
       pull-requests: write
     steps:
-      - name: 10 - Checkout da branch enviada
-        uses: actions/checkout@v5
-        with:
-          persist-credentials: false
-      - name: 10a - Criar token do GitHub App da organizacao
-        if: vars.FIAP_PROMOTION_APP_CLIENT_ID != '' || vars.FIAP_PROMOTION_APP_ID != ''
-        id: promotion-token
-        uses: actions/create-github-app-token@v3
-        with:
-          client-id: ${{ vars.FIAP_PROMOTION_APP_CLIENT_ID || vars.FIAP_PROMOTION_APP_ID }}
-          private-key: ${{ secrets.FIAP_PROMOTION_APP_PRIVATE_KEY }}
-          permission-contents: write
-          permission-pull-requests: write
-      - name: 10b - Avisar sobre aprovacao manual da esteira
-        if: vars.FIAP_PROMOTION_APP_CLIENT_ID == '' && vars.FIAP_PROMOTION_APP_ID == ''
-        run: echo '::warning::Configure o GitHub App de promocao para que PRs gerados automaticamente iniciem a esteira sem aprovacao manual.'
-      - name: 11 - Abrir PR para develop ou release
-        env:
-          GH_TOKEN: ${{ steps.promotion-token.outputs.token || secrets.GITHUB_TOKEN }}
-        run: python .github/scripts/flow.py promote
-
+    - name: 10 - Checkout da branch enviada
+      uses: actions/checkout@v5
+      with:
+        persist-credentials: false
+    - name: 10a - Criar token do GitHub App da organizacao
+      if: vars.FIAP_PROMOTION_APP_CLIENT_ID != '' || vars.FIAP_PROMOTION_APP_ID != ''
+      id: promotion-token
+      uses: actions/create-github-app-token@v3
+      with:
+        client-id: ${{ vars.FIAP_PROMOTION_APP_CLIENT_ID || vars.FIAP_PROMOTION_APP_ID }}
+        private-key: ${{ secrets.FIAP_PROMOTION_APP_PRIVATE_KEY }}
+        permission-contents: write
+        permission-pull-requests: write
+    - name: 10b - Avisar sobre aprovacao manual da esteira
+      if: vars.FIAP_PROMOTION_APP_CLIENT_ID == '' && vars.FIAP_PROMOTION_APP_ID == ''
+      run: echo '::warning::Configure o GitHub App de promocao para que PRs gerados automaticamente iniciem a esteira sem
+        aprovacao manual.'
+    - name: 11 - Abrir PR para develop ou release
+      env:
+        GH_TOKEN: ${{ steps.promotion-token.outputs.token || secrets.GITHUB_TOKEN }}
+      run: python .github/scripts/flow.py promote
   promote:
     name: Promote
-    needs: [route, verify, deploy]
-    if: >-
-      always() && github.event_name == 'push' && !github.event.created &&
-      (github.ref_name == 'develop' || startsWith(github.ref_name, 'release/') || github.ref_name == 'prod') &&
-      needs.route.result == 'success' && needs.verify.result == 'success' && needs.deploy.result == 'success'
+    needs:
+    - route
+    - verify
+    - deploy
+    if: needs.route.outputs.maintenance != 'true' && needs.route.outputs.destroy_request != 'true' && (always() && github.event_name
+      == 'push' && !github.event.created && (github.ref_name == 'develop' || startsWith(github.ref_name, 'release/') || github.ref_name
+      == 'prod') && needs.route.result == 'success' && needs.verify.result == 'success' && needs.deploy.result == 'success')
     runs-on: ubuntu-latest
     permissions:
       contents: write
       pull-requests: write
     steps:
-      - name: 10 - Checkout do automador
-        uses: actions/checkout@v5
-        with:
-          persist-credentials: false
-          ref: ${{ github.ref_name }}
-      - name: 10a - Criar token do GitHub App da organizacao
-        if: vars.FIAP_PROMOTION_APP_CLIENT_ID != '' || vars.FIAP_PROMOTION_APP_ID != ''
-        id: promotion-token
-        uses: actions/create-github-app-token@v3
-        with:
-          client-id: ${{ vars.FIAP_PROMOTION_APP_CLIENT_ID || vars.FIAP_PROMOTION_APP_ID }}
-          private-key: ${{ secrets.FIAP_PROMOTION_APP_PRIVATE_KEY }}
-          permission-contents: write
-          permission-pull-requests: write
-      - name: 10b - Avisar sobre aprovacao manual da esteira
-        if: vars.FIAP_PROMOTION_APP_CLIENT_ID == '' && vars.FIAP_PROMOTION_APP_ID == ''
-        run: echo '::warning::Configure o GitHub App de promocao para que PRs gerados automaticamente iniciem a esteira sem aprovacao manual.'
-      - name: 11 - Abrir PR da próxima etapa
-        env:
-          GH_TOKEN: ${{ steps.promotion-token.outputs.token || secrets.GITHUB_TOKEN }}
-        run: python .github/scripts/flow.py promote
+    - name: 10 - Checkout do automador
+      uses: actions/checkout@v5
+      with:
+        persist-credentials: false
+        ref: ${{ github.ref_name }}
+    - name: 10a - Criar token do GitHub App da organizacao
+      if: vars.FIAP_PROMOTION_APP_CLIENT_ID != '' || vars.FIAP_PROMOTION_APP_ID != ''
+      id: promotion-token
+      uses: actions/create-github-app-token@v3
+      with:
+        client-id: ${{ vars.FIAP_PROMOTION_APP_CLIENT_ID || vars.FIAP_PROMOTION_APP_ID }}
+        private-key: ${{ secrets.FIAP_PROMOTION_APP_PRIVATE_KEY }}
+        permission-contents: write
+        permission-pull-requests: write
+    - name: 10b - Avisar sobre aprovacao manual da esteira
+      if: vars.FIAP_PROMOTION_APP_CLIENT_ID == '' && vars.FIAP_PROMOTION_APP_ID == ''
+      run: echo '::warning::Configure o GitHub App de promocao para que PRs gerados automaticamente iniciem a esteira sem
+        aprovacao manual.'
+    - name: 11 - Abrir PR da próxima etapa
+      env:
+        GH_TOKEN: ${{ steps.promotion-token.outputs.token || secrets.GITHUB_TOKEN }}
+      run: python .github/scripts/flow.py promote
