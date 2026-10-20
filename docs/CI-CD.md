@@ -107,3 +107,9 @@ da aplicacao cria seus proprios dados e valida o CPF em todos os ambientes.
 Execute `python -m unittest discover -s .github/scripts -p 'test_*.py' -v` para
 testar rotas/SemVer localmente. `simulate_flow.py` permanece uma simulacao local;
 os gates de promocao usam `verify_external.py` com os servicos reais.
+
+## Operação de desmontagem e manutenção
+
+A operação central é solicitada no fiap-k8s pela branch exata feature/destroy-infra-aws, com PR para ALL e aprovação dos dois integrantes diferentes do solicitante. A instalação administrativa e as permissões precisam estar concluídas antes do uso. Consulte FIAP-GRUPO05/fiap-k8s, docs/DESTROY-AWS.md.
+
+FIAP_INFRA_STATE=destroying ou destroyed bloqueia publicações e promoções normais. Antes de alterar AWS, os jobs também consultam o controle S3 fiap/operations/state.json; backend ausente ou estado diferente de active bloqueia a operação. Após a desmontagem, a reativação exige recuperação administrativa explícita.
