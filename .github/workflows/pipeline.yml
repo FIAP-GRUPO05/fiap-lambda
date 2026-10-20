@@ -40,7 +40,7 @@ jobs:
       run: |
         set -euo pipefail
         state="${FIAP_INFRA_STATE:-active}"
-        case "$state" in active|destroying|destroyed) ;; *) echo '::error::Estado de infraestrutura inválido'; exit 1 ;; esac
+        case "$state" in active|maintenance|destroying|destroyed) ;; *) echo '::error::Estado de infraestrutura inválido'; exit 1 ;; esac
         maintenance=false
         if [[ "$state" != active ]]; then maintenance=true; fi
         operational=false
