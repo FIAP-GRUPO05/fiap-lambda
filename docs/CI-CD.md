@@ -13,15 +13,16 @@ e abre o PR da proxima etapa somente depois do sucesso.
 | Merge em develop | Repete os gates, implanta codigo no ambiente develop e abre PR para uma nova release |
 | PR develop para `release/vX.Y.Z` | Gates anteriores e conexoes reais AWS, API Gateway, JWT, banco e New Relic do ambiente de origem |
 | Merge na release | Implanta em homol; a aplicacao executa a regressao HTTPS antes de abrir PR para prod |
-| PR release para prod | Gates anteriores, conectividade de homol e regressao; exige revisao humana |
+| PR release para prod | Gates anteriores, conectividade de homol e regressao; recomenda revisao humana |
 | Merge em prod | Aplica Terraform compartilhado, implanta codigo em prod e verifica o resultado antes de abrir PR para main |
 | PR prod para main | Somente Route e merge manual; sem build, testes ou deploy |
 | Push `rollback/*` ou `rolback/*` | Abre PR direto para a release ativa enquanto prod estiver a frente de main |
 
 Rotas invalidas falham em Route com as instrucoes corretas. Branches com outros
 nomes nao iniciam CI no push. Rulesets remotos ativos exigem PR e os checks
-Route/Verify nas branches de ambiente. Prod e main exigem uma aprovacao e nao
-permitem bypass. O GitHub App abre os PRs e permite que seus eventos iniciem CI.
+Route/Verify nas branches de ambiente. Aprovacoes de revisores sao recomendadas,
+com zero aprovacoes obrigatorias em develop, release/*, prod e main. O GitHub App
+abre os PRs e permite que seus eventos iniciem CI.
 O merge de cada etapa continua sendo uma decisao humana.
 
 Somente o GitHub App de promocao pode criar release/* e prod. Uma regra
@@ -33,6 +34,21 @@ O rollback deve partir da release associada ao commit atual de prod. Crie
 `rollback/<descricao>` a partir dela e registre os commits de reversao, por
 exemplo com `git revert`; o push abre o PR de volta para essa release. A branch
 de release deve ser preservada ate prod ser integrado em main.
+
+## Revisões recomendadas
+
+Recomenda-se pedir a revisão de outro integrante antes de integrar alterações,
+especialmente em infraestrutura, autenticação e dados. Essa revisão é uma
+recomendação do time; a quantidade de aprovações não bloqueia o merge normal.
+O autor pode fazer o merge do próprio PR quando os demais requisitos estiverem
+atendidos. O GitHub não permite ao autor registrar aprovação no próprio PR.
+
+Os rulesets normais usam `required_approving_review_count=0`, sem aprovação de
+Code Owners nem de alguém diferente do último autor de push como requisito.
+PR, rotas de promoção, checks e resolução das discussões continuam aplicáveis.
+Uma revisão que solicita alterações deve ser resolvida ou dispensada conforme
+as regras do GitHub. Isso é diferente de exigir uma quantidade de aprovações.
+A operação específica de ALL segue a política de desmontagem documentada.
 
 ## Versionamento
 
