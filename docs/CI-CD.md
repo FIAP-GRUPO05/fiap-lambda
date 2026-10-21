@@ -3,8 +3,37 @@
 Cada repositorio usa um unico `.github/workflows/pipeline.yml`, com jobs dentro
 da mesma execucao. Push e atualizacao de PR sao eventos diferentes: o push valida
 a branch e o PR valida o resultado proposto para a branch de destino. Nao ha
-workflow adicional disparado pelo fechamento do PR; o push do merge faz o deploy
-e abre o PR da proxima etapa somente depois do sucesso.
+workflow adicional disparado pelo fechamento do PR. Em active, o push do merge
+faz o deploy e abre o PR seguinte depois do sucesso. Em maintenance, valida o
+codigo e abre o PR seguinte sem deploy, conforme a politica abaixo.
+
+## Modo da infraestrutura e promocao automatica
+
+| Estado | Validacoes de codigo | PR da proxima etapa | Deploy AWS |
+|---|---|---|---|
+| active | Esteira completa, incluindo os gates externos aplicaveis | Depois das validacoes e publicacao exigidas | Permitido pelos guards |
+| maintenance | Build, testes, cobertura aplicavel, seguranca e Terraform validate sem backend | Automatico depois de Verify passar | Bloqueado |
+| destroying / destroyed | CI de feature pode continuar; integracao de ambientes fica congelada | Bloqueado entre ambientes | Bloqueado |
+
+Em maintenance, cada merge aprovado pelos checks em develop, release ou prod abre
+um PR para a proxima etapa. O merge continua manual. Prod para main continua com
+apenas Route; nenhuma esteira completa ou deploy e executada nesse PR.
+
+As consultas AWS/OIDC, conectividade de banco/API, telemetria real e regressao dos
+servicos implantados nao sao executadas em maintenance. O resumo de Verify lista
+os passos executados e as verificacoes externas pendentes. Uma promocao nesse
+modo integra codigo; a prontidao do ambiente real precisa ser comprovada com a
+infraestrutura ativa. Downloads de dependencias, scanners e providers continuam
+necessarios no runner; eles nao dependem dos recursos AWS do projeto.
+
+A etapa Promote aceita deploy ignorado somente em maintenance e sempre exige
+Verify com sucesso. Em active, os gates e a publicacao anteriores continuam
+obrigatorios. Reexecutar o mesmo merge reutiliza a promocao identificada pelo
+marcador fiap-promotion-source no corpo do PR. Nao remover esse marcador.
+A versao considera tambem os commits pendentes de develop desde prod, evitando
+classificar como patch uma entrega que ainda contem funcionalidades novas.
+
+### Fluxo com infraestrutura ativa
 
 | Evento | Validacao e resultado |
 | --- | --- |
