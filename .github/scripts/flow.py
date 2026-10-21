@@ -82,7 +82,7 @@ def ensure_branch(name, from_branch):
     return branch(name)
 
 
-def open_pr(head, base, title):
+def open_pr(head, base, title, source_sha=None):
     owner = os.environ["GITHUB_REPOSITORY"].split("/")[0]
     query = urllib.parse.urlencode({"state": "open", "head": f"{owner}:{head}", "base": base, "per_page": 100})
     existing = request("GET", f"pulls?{query}")
@@ -91,9 +91,20 @@ def open_pr(head, base, title):
         return
     if not branch(head) or not branch(base):
         raise RuntimeError(f"Não foi possível abrir PR: {head} ou {base} não existe")
+    mode = os.environ.get("FIAP_INFRA_STATE", "active")
+    description = [f"Promoção automática de `{head}` para `{base}`.",
+                   f"Fluxo: {FLOW}.", "O merge permanece manual; revisões são recomendadas."]
+    if mode == "maintenance":
+        description += ["Modo maintenance: somente integração do código; deploys AWS bloqueados.",
+                        "Build, testes, cobertura aplicável, segurança e Terraform são verificados sem acesso aos ambientes.",
+                        "Conectividade, telemetria real e regressões dos serviços implantados continuam pendentes."]
+    else:
+        description += ["A etapa anterior deve concluir os gates e a publicação exigidos pelo workflow."]
+    if source_sha:
+        description.append(f"<!-- fiap-promotion-source:{source_sha} -->")
     try:
         pr = request("POST", "pulls", {"head": head, "base": base, "title": title,
-                                         "body": f"Promoção automática. Fluxo: {FLOW}\n\nO merge permanece manual."})
+                                         "body": "\n".join(description)})
     except urllib.error.HTTPError as error:
         detail = error.read().decode()
         raise RuntimeError(f"Falha ao abrir PR {head} → {base}: {detail}") from error
@@ -105,6 +116,35 @@ def release_version():
     versions = [tuple(map(int, match.groups())) for item in branches
                 if (match := RELEASE.fullmatch(item["name"]))]
     return max(versions, default=(0, 0, 0))
+
+
+def release_for_commit(sha):
+    """A retry of the same merge must reuse its already recorded release."""
+    owner = os.environ["GITHUB_REPOSITORY"].split("/")[0]
+    page = 1
+    marker = f"<!-- fiap-promotion-source:{sha} -->"
+    while True:
+        query = urllib.parse.urlencode({"state": "all", "head": owner + ":develop", "per_page": 100, "page": page})
+        pulls = request("GET", "pulls?" + query)
+        for pull in pulls:
+            if RELEASE.fullmatch(pull["base"]["ref"]) and marker in (pull.get("body") or ""):
+                return pull
+        if len(pulls) < 100:
+            return None
+        page += 1
+
+
+def pending_messages(base):
+    """Include features waiting in develop since the current production version."""
+    result = []
+    page = 1
+    while True:
+        comparison = request("GET", f"compare/{base}...develop?per_page=100&page={page}")
+        commits = comparison["commits"]
+        result.extend(item["commit"]["message"] for item in commits)
+        if len(commits) < 100:
+            return result
+        page += 1
 
 
 def active_release():
@@ -130,6 +170,14 @@ def pending_prod():
 
 
 def promote(event_name, ref, event):
+    state = os.environ.get("FIAP_INFRA_STATE", "active")
+    if state not in {"active", "maintenance", "destroying", "destroyed"}:
+        raise RuntimeError("Estado de infraestrutura invalido")
+    environment_event = (event_name == "push" and (ref in {"develop", "prod"} or RELEASE.fullmatch(ref))) or (
+        event_name == "pull_request" and event.get("pull_request", {}).get("base", {}).get("ref") in {"develop", "prod"}) or (
+        event_name == "pull_request" and RELEASE.fullmatch(event.get("pull_request", {}).get("base", {}).get("ref", "")))
+    if state in {"destroying", "destroyed"} and environment_event:
+        raise RuntimeError("Promocoes de ambiente bloqueadas durante ou apos a desmontagem")
     if event_name == "push":
         if FEATURE.fullmatch(ref):
             open_pr(ref, "develop", f"integrate: {ref} → develop")
@@ -145,7 +193,7 @@ def promote(event_name, ref, event):
             merged = [item for item in candidates if item.get("merged_at") and
                       item["base"]["ref"] == ref and item.get("merge_commit_sha") == event["after"]]
             if not merged:
-                raise RuntimeError("Promocao de ambiente exige push originado por merge de um PR aprovado")
+                raise RuntimeError("Promocao de ambiente exige push originado por merge de um PR")
             merged_pr = {**merged[0], "merged": True}
             return promote("pull_request", ref, {"action": "closed", "pull_request": merged_pr})
         return
@@ -156,14 +204,21 @@ def promote(event_name, ref, event):
     source, target = pr["head"]["ref"], pr["base"]["ref"]
     route(source, target)
     if target == "develop":
+        sha = pr["merge_commit_sha"]
+        existing = release_for_commit(sha)
+        if existing:
+            print(f"Promoção já registrada: {existing['html_url']}")
+            return
         titles = [pr["title"]]
         if "number" in pr:
             commits = request("GET", f"pulls/{pr['number']}/commits?per_page=100")
             titles.extend(item["commit"]["message"] for item in commits)
+        base = "prod" if branch("prod") else "main"
+        titles.extend(pending_messages(base))
         version = bump(release_version(), "\n".join(titles), [label["name"] for label in pr.get("labels", [])])
         release = "release/v" + ".".join(map(str, version))
-        ensure_branch(release, "prod" if branch("prod") else "main")
-        open_pr("develop", release, f"release: {release}")
+        ensure_branch(release, base)
+        open_pr("develop", release, f"release: {release}", source_sha=sha)
     elif RELEASE.fullmatch(target):
         ensure_branch("prod", "main")
         open_pr(target, "prod", f"promote: {target} → prod")
