@@ -145,7 +145,7 @@ def promote(event_name, ref, event):
             merged = [item for item in candidates if item.get("merged_at") and
                       item["base"]["ref"] == ref and item.get("merge_commit_sha") == event["after"]]
             if not merged:
-                raise RuntimeError("Promocao de ambiente exige push originado por merge de um PR aprovado")
+                raise RuntimeError("Promocao de ambiente exige push originado por merge de um PR")
             merged_pr = {**merged[0], "merged": True}
             return promote("pull_request", ref, {"action": "closed", "pull_request": merged_pr})
         return
