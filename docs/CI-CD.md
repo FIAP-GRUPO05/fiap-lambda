@@ -3,8 +3,37 @@
 Cada repositorio usa um unico `.github/workflows/pipeline.yml`, com jobs dentro
 da mesma execucao. Push e atualizacao de PR sao eventos diferentes: o push valida
 a branch e o PR valida o resultado proposto para a branch de destino. Nao ha
-workflow adicional disparado pelo fechamento do PR; o push do merge faz o deploy
-e abre o PR da proxima etapa somente depois do sucesso.
+workflow adicional disparado pelo fechamento do PR. Em active, o push do merge
+faz o deploy e abre o PR seguinte depois do sucesso. Em maintenance, valida o
+codigo e abre o PR seguinte sem deploy, conforme a politica abaixo.
+
+## Modo da infraestrutura e promocao automatica
+
+| Estado | Validacoes de codigo | PR da proxima etapa | Deploy AWS |
+|---|---|---|---|
+| active | Esteira completa, incluindo os gates externos aplicaveis | Depois das validacoes e publicacao exigidas | Permitido pelos guards |
+| maintenance | Build, testes, cobertura aplicavel, seguranca e Terraform validate sem backend | Automatico depois de Verify passar | Bloqueado |
+| destroying / destroyed | CI de feature pode continuar; integracao de ambientes fica congelada | Bloqueado entre ambientes | Bloqueado |
+
+Em maintenance, cada merge aprovado pelos checks em develop, release ou prod abre
+um PR para a proxima etapa. O merge continua manual. Prod para main continua com
+apenas Route; nenhuma esteira completa ou deploy e executada nesse PR.
+
+As consultas AWS/OIDC, conectividade de banco/API, telemetria real e regressao dos
+servicos implantados nao sao executadas em maintenance. O resumo de Verify lista
+os passos executados e as verificacoes externas pendentes. Uma promocao nesse
+modo integra codigo; a prontidao do ambiente real precisa ser comprovada com a
+infraestrutura ativa. Downloads de dependencias, scanners e providers continuam
+necessarios no runner; eles nao dependem dos recursos AWS do projeto.
+
+A etapa Promote aceita deploy ignorado somente em maintenance e sempre exige
+Verify com sucesso. Em active, os gates e a publicacao anteriores continuam
+obrigatorios. Reexecutar o mesmo merge reutiliza a promocao identificada pelo
+marcador fiap-promotion-source no corpo do PR. Nao remover esse marcador.
+A versao considera tambem os commits pendentes de develop desde prod, evitando
+classificar como patch uma entrega que ainda contem funcionalidades novas.
+
+### Fluxo com infraestrutura ativa
 
 | Evento | Validacao e resultado |
 | --- | --- |
@@ -13,15 +42,16 @@ e abre o PR da proxima etapa somente depois do sucesso.
 | Merge em develop | Repete os gates, implanta codigo no ambiente develop e abre PR para uma nova release |
 | PR develop para `release/vX.Y.Z` | Gates anteriores e conexoes reais AWS, API Gateway, JWT, banco e New Relic do ambiente de origem |
 | Merge na release | Implanta em homol; a aplicacao executa a regressao HTTPS antes de abrir PR para prod |
-| PR release para prod | Gates anteriores, conectividade de homol e regressao; exige revisao humana |
+| PR release para prod | Gates anteriores, conectividade de homol e regressao; recomenda revisao humana |
 | Merge em prod | Aplica Terraform compartilhado, implanta codigo em prod e verifica o resultado antes de abrir PR para main |
 | PR prod para main | Somente Route e merge manual; sem build, testes ou deploy |
 | Push `rollback/*` ou `rolback/*` | Abre PR direto para a release ativa enquanto prod estiver a frente de main |
 
 Rotas invalidas falham em Route com as instrucoes corretas. Branches com outros
 nomes nao iniciam CI no push. Rulesets remotos ativos exigem PR e os checks
-Route/Verify nas branches de ambiente. Prod e main exigem uma aprovacao e nao
-permitem bypass. O GitHub App abre os PRs e permite que seus eventos iniciem CI.
+Route/Verify nas branches de ambiente. Aprovacoes de revisores sao recomendadas,
+com zero aprovacoes obrigatorias em develop, release/*, prod e main. O GitHub App
+abre os PRs e permite que seus eventos iniciem CI.
 O merge de cada etapa continua sendo uma decisao humana.
 
 Somente o GitHub App de promocao pode criar release/* e prod. Uma regra
@@ -33,6 +63,21 @@ O rollback deve partir da release associada ao commit atual de prod. Crie
 `rollback/<descricao>` a partir dela e registre os commits de reversao, por
 exemplo com `git revert`; o push abre o PR de volta para essa release. A branch
 de release deve ser preservada ate prod ser integrado em main.
+
+## Revisões recomendadas
+
+Recomenda-se pedir a revisão de outro integrante antes de integrar alterações,
+especialmente em infraestrutura, autenticação e dados. Essa revisão é uma
+recomendação do time; a quantidade de aprovações não bloqueia o merge normal.
+O autor pode fazer o merge do próprio PR quando os demais requisitos estiverem
+atendidos. O GitHub não permite ao autor registrar aprovação no próprio PR.
+
+Os rulesets normais usam `required_approving_review_count=0`, sem aprovação de
+Code Owners nem de alguém diferente do último autor de push como requisito.
+PR, rotas de promoção, checks e resolução das discussões continuam aplicáveis.
+Uma revisão que solicita alterações deve ser resolvida ou dispensada conforme
+as regras do GitHub. Isso é diferente de exigir uma quantidade de aprovações.
+A operação específica de ALL segue a política de desmontagem documentada.
 
 ## Versionamento
 
@@ -107,3 +152,9 @@ da aplicacao cria seus proprios dados e valida o CPF em todos os ambientes.
 Execute `python -m unittest discover -s .github/scripts -p 'test_*.py' -v` para
 testar rotas/SemVer localmente. `simulate_flow.py` permanece uma simulacao local;
 os gates de promocao usam `verify_external.py` com os servicos reais.
+
+## Operação de desmontagem e manutenção
+
+A operação central é solicitada no fiap-k8s pela branch exata feature/destroy-infra-aws, com PR para ALL e aprovação dos dois integrantes diferentes do solicitante. A instalação administrativa e as permissões precisam estar concluídas antes do uso. Consulte FIAP-GRUPO05/fiap-k8s, docs/DESTROY-AWS.md.
+
+FIAP_INFRA_STATE=destroying ou destroyed bloqueia publicações e promoções normais. Antes de alterar AWS, os jobs também consultam o controle S3 fiap/operations/state.json; backend ausente ou estado diferente de active bloqueia a operação. Após a desmontagem, a reativação exige recuperação administrativa explícita.
