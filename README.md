@@ -1,26 +1,64 @@
 # fiap-lambda
 
-Funções Python de autenticação por CPF ou e-mail/senha, emissão de JWT RS256 e adaptador de notificações por e-mail.
+Funções serverless de autenticação por CPF/e-mail e notificações de ordens de serviço. O cliente ativo recebe JWT RS256; o envio de e-mail usa uma Lambda por ambiente e Amazon SES.
 
 📚 **[Documentação principal — fiap-docs](https://github.com/FIAP-GRUPO05/fiap-docs)**
 
-## Requisitos
+## Tecnologias e requisitos
 
-- Python 3.12 e pip para desenvolvimento e testes.
-- Docker, Terraform e AWS CLI somente para as etapas administrativas descritas na documentação central.
+Python 3.12, boto3, PyJWT, PostgreSQL, AWS Lambda, API Gateway, SES e Terraform 1.13+. Docker com Compose v2 permite testar o runtime local. AWS CLI autenticado é necessário somente para o bootstrap administrativo; o CI usa OIDC.
+
+## Arquitetura deste componente
+
+```mermaid
+flowchart LR
+    Cliente --> Gateway[API Gateway]
+    Gateway --> Auth[Lambda de autenticacao]
+    Auth --> RDS[(RDS: cliente e status)]
+    Auth --> SM[Secrets Manager: chave RSA]
+    Gateway --> JWT[Authorizer JWT / rotas protegidas]
+    API[API Java apos commit da OS] --> Email[Lambda de email por ambiente]
+    Email --> SES[SES: remetente verificado]
+    Auth --> Logs[CloudWatch Logs]
+    Email --> Logs
+```
 
 ## Testar localmente
 
-Na raiz deste repositório:
+Na raiz deste repositório, em PowerShell:
 
 ```powershell
-python -m pip install -r requirements.txt
-python -m unittest discover -s tests -v
+python -m venv .venv
+./.venv/Scripts/python.exe -m pip install -r requirements-dev.txt
+./.venv/Scripts/python.exe -m coverage run --source=codetoken,codeemail -m unittest discover -s tests -v
+./.venv/Scripts/python.exe -m coverage report --fail-under=90
+docker compose -p fiap-notifications-local -f compose.notifications.yaml up --build -d
+python .github/scripts/local_notification_smoke.py
 ```
 
-Os testes unitários usam dependências simuladas. Testes externos exigem um ambiente provisionado e dados de teste; sem configuração, ficam explicitamente ignorados.
+O teste Docker chama o runtime Lambda em `http://127.0.0.1:19000` e confirma HTML, texto e correlação no [MailHog local](http://127.0.0.1:18025). Nenhum e-mail sai para a internet. Para encerrar: `docker compose -p fiap-notifications-local -f compose.notifications.yaml down`. No Linux/macOS, o Python do venv está em `.venv/bin/python`.
 
-As funções são handlers Lambda, não um servidor HTTP local. Para a documentação do projeto, consulte o [fiap-docs](https://github.com/FIAP-GRUPO05/fiap-docs).
+A Lambda de e-mail aceita `{to, subject, body, html, correlationId}`. `operation=health` verifica o remetente SES sem enviar e-mail. SMTP fica restrito a `ENVIRONMENT=local`; a AWS usa SES e IAM, sem senha SMTP. Os testes de autenticação externos exigem ambiente provisionado e seus dados; sem eles, ficam explicitamente ignorados.
+
+## Deploy e ambientes
+
+O fluxo é `feature/* → develop → release/vX.Y.Z → prod → main`. Após o push da feature e o sucesso da CI, o PR é aberto automaticamente; os merges são manuais. Os próximos PRs são gerados após a promoção aprovada. `develop`, `release/*` e `prod` publicam no ambiente correspondente quando a infraestrutura está `active`; `prod → main` apenas consolida a versão.
+
+Em `destroyed`/`destroying`, deploys e promoções ficam bloqueados. Em `maintenance`, a CI permite validar e promover código, mantendo os deploys bloqueados. O bootstrap administrativo usa AWS CLI; a operação diária do CI usa OIDC e não exige credenciais AWS de cada integrante.
+
+A CI inclui testes, cobertura mínima de 90%, runtime Docker com MailHog, segurança e validação Terraform. No deploy, o código é empacotado para Linux, publicado em versões e promovido ao alias `live` somente após os checks. A função de e-mail permanece no alias anterior quando o healthcheck SES falha.
+
+Antes do primeiro provisionamento, configure `FIAP_NOTIFICATION_SENDER` com um endereço autorizado e verificado no SES de `sa-east-1`. No sandbox SES, use destinatários verificados ou o simulador da AWS. O bootstrap e a verificação do endereço são preparados pelo script administrativo do `fiap-k8s`.
+
+## API e URLs dos ambientes
+
+Os ambientes AWS foram desmontados para controle de custos; não há URL ativa para anunciar neste estado. Após a reconstrução, consulte as URLs e emissores atuais, sem reutilizar endereços antigos:
+
+```powershell
+gh api repos/FIAP-GRUPO05/fiap-lambda/actions/variables/FIAP_RUNTIME_CONFIG --jq .value
+```
+
+Em cada `api_url`, o Swagger fica em `/swagger-ui/index.html`, o OpenAPI em `/v3/api-docs` e a saúde em `/actuator/health`. A autenticação CPF usa `POST /auth/customer`; operações protegidas exigem `Authorization: Bearer <JWT>`.
 
 ## Membros da equipe
 
