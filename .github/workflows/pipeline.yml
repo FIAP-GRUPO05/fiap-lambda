@@ -126,11 +126,18 @@ jobs:
         python-version: '3.12'
       id: check_4
     - name: 03 - Dependências
-      run: python -m pip install -r requirements.txt coverage
+      run: python -m pip install -r requirements-dev.txt
       id: check_5
     - name: 04 - Build e testes
       run: python -m unittest discover -s tests -v
       id: check_6
+    - name: 04a - Runtime Lambda e captura local dos emails
+      run: |
+        docker compose -p fiap-notifications-local -f compose.notifications.yaml up --build -d
+        python .github/scripts/local_notification_smoke.py
+    - name: Encerrar ambiente local de notificacoes
+      if: always()
+      run: docker compose -p fiap-notifications-local -f compose.notifications.yaml down
     - name: 05 - Cobertura mínima de 90%
       if: needs.route.outputs.infra_state == 'maintenance' || (github.event_name == 'pull_request' || github.ref_name == 'develop'
         || startsWith(github.ref_name, 'release/') || github.ref_name == 'prod')
@@ -284,6 +291,7 @@ jobs:
         python -m pip install --platform manylinux_2_34_x86_64 --platform manylinux_2_28_x86_64 --platform manylinux2014_x86_64 --implementation cp --python-version 3.12 --only-binary=:all: --no-compile --target build/token-package -r requirements.txt
         cp codetoken/main.py build/token-package/main.py
         python -c "import shutil; shutil.make_archive('build/token', 'zip', 'build/token-package')"
+        python -c "import zipfile; z=zipfile.ZipFile('build/email.zip', 'w', zipfile.ZIP_DEFLATED); z.write('codeemail/main.py', 'main.py'); z.close()"
     - name: Autenticar para Terraform da infraestrutura compartilhada
       if: github.ref_name == 'prod'
       uses: aws-actions/configure-aws-credentials@v6.3.0
@@ -302,6 +310,8 @@ jobs:
       run: python .github/scripts/infra_guard.py
       if: github.ref_name == 'prod'
     - name: Aplicar gateway e funcoes compartilhadas
+      env:
+        TF_VAR_notification_sender: ${{ vars.FIAP_NOTIFICATION_SENDER }}
       if: github.ref_name == 'prod'
       shell: bash
       run: |
@@ -320,7 +330,9 @@ jobs:
         FIAP_INFRA_STATE: ${{ vars.FIAP_INFRA_STATE }}
       run: python .github/scripts/infra_guard.py
     - name: Publicar versao, verificar e promover alias com rollback em falha
-      run: python .github/scripts/deploy_lambda.py ${{ steps.target.outputs.environment }} build/token.zip
+      run: |
+        python .github/scripts/deploy_lambda.py ${{ steps.target.outputs.environment }} build/token.zip
+        python .github/scripts/deploy_notifications.py ${{ steps.target.outputs.environment }} build/email.zip
   propose:
     name: Propose
     needs:

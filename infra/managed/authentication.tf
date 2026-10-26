@@ -61,6 +61,11 @@ resource "aws_lambda_function" "authentication" {
     subnet_ids         = data.terraform_remote_state.platform.outputs.private_subnet_ids
     security_group_ids = [data.terraform_remote_state.platform.outputs.lambda_security_group_id]
   }
+  logging_config {
+    log_format            = "JSON"
+    application_log_level = "INFO"
+    system_log_level      = "INFO"
+  }
   environment {
     variables = {
       DB_HOST                    = data.terraform_remote_state.database.outputs.db_address

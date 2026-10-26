@@ -1,0 +1,21 @@
+services:
+  mailhog:
+    image: mailhog/mailhog:v1.0.1
+    ports:
+      - "127.0.0.1:18025:8025"
+  notification:
+    build:
+      context: .
+      dockerfile: codeemail/Dockerfile
+    ports:
+      - "127.0.0.1:19000:8080"
+    environment:
+      AWS_LAMBDA_LOG_FORMAT: JSON
+      ENVIRONMENT: local
+      EMAIL_PROVIDER: SMTP
+      NOTIFICATIONS_EMAIL_FROM: oficina@example.test
+      SMTP_SERVER: mailhog
+      SMTP_PORT: "1025"
+      AWS_EC2_METADATA_DISABLED: "true"
+    depends_on:
+      - mailhog
