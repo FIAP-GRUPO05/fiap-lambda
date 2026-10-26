@@ -45,18 +45,17 @@ data "archive_file" "notifications" {
 }
 
 resource "aws_lambda_function" "notifications" {
-  for_each                       = local.environments
-  function_name                  = "fiap-email-${each.key}"
-  description                    = "Service-order notifications through SES with correlated logs"
-  role                           = aws_iam_role.notifications[each.key].arn
-  runtime                        = "python3.12"
-  handler                        = "main.lambda_handler"
-  memory_size                    = 128
-  timeout                        = 30
-  reserved_concurrent_executions = 2
-  filename                       = data.archive_file.notifications.output_path
-  source_code_hash               = data.archive_file.notifications.output_base64sha256
-  publish                        = true
+  for_each         = local.environments
+  function_name    = "fiap-email-${each.key}"
+  description      = "Service-order notifications through SES with correlated logs"
+  role             = aws_iam_role.notifications[each.key].arn
+  runtime          = "python3.12"
+  handler          = "main.lambda_handler"
+  memory_size      = 128
+  timeout          = 30
+  filename         = data.archive_file.notifications.output_path
+  source_code_hash = data.archive_file.notifications.output_base64sha256
+  publish          = true
   logging_config {
     log_format            = "JSON"
     application_log_level = "INFO"
