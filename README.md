@@ -52,7 +52,15 @@ Antes do primeiro provisionamento, configure `FIAP_NOTIFICATION_SENDER` com um e
 
 ## API e URLs dos ambientes
 
-Os ambientes AWS foram desmontados para controle de custos; não há URL ativa para anunciar neste estado. Após a reconstrução, consulte as URLs e emissores atuais, sem reutilizar endereços antigos:
+URLs verificadas em 28/10/2026, com saúde `UP` e regressivo das 53 operações OpenAPI aprovado em cada ambiente:
+
+| Ambiente | API | Swagger |
+| --- | --- | --- |
+| Develop | [API](https://ku4upcna7k.execute-api.sa-east-1.amazonaws.com) | [Swagger](https://ku4upcna7k.execute-api.sa-east-1.amazonaws.com/swagger-ui/index.html) |
+| Homologação | [API](https://ryzzw5lm77.execute-api.sa-east-1.amazonaws.com) | [Swagger](https://ryzzw5lm77.execute-api.sa-east-1.amazonaws.com/swagger-ui/index.html) |
+| Produção | [API](https://khha99ce86.execute-api.sa-east-1.amazonaws.com) | [Swagger](https://khha99ce86.execute-api.sa-east-1.amazonaws.com/swagger-ui/index.html) |
+
+Uma reconstrução pode gerar novos endereços. A configuração usada pela CI é consultada com:
 
 ```powershell
 gh api repos/FIAP-GRUPO05/fiap-lambda/actions/variables/FIAP_RUNTIME_CONFIG --jq .value
