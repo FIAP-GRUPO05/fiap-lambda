@@ -1,12 +1,11 @@
 import base64
 import json
 import os
-import sys
 import unittest
 from unittest.mock import MagicMock, patch
 
-sys.modules.setdefault("boto3", MagicMock())
-from codetoken import main
+with patch("boto3.client", side_effect=lambda *args, **kwargs: MagicMock()):
+    from codetoken import main
 
 
 class TokenEdgeTest(unittest.TestCase):
