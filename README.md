@@ -1,89 +1,94 @@
-# Autenticacao serverless - Tech Challenge Fase 3
+# fiap-lambda
 
-A Lambda autentica clientes pelo CPF e usuarios internos por e-mail/senha.
-Os tres ambientes usam funcoes, chaves RSA e credenciais de banco separadas na
-conta AWS TWM `456687462806`, regiao `sa-east-1`.
+Funções serverless de autenticação por CPF/e-mail e notificações de ordens de serviço. O cliente ativo recebe JWT RS256; o envio de e-mail usa uma Lambda por ambiente e Amazon SES.
 
-A raiz Terraform ativa e `infra/managed`. As definicoes anteriores com `LabRole`
-foram substituidas. O estado remoto e `fiap/lambda-shared.tfstate`.
+📚 **[Documentação principal — fiap-docs](https://github.com/FIAP-GRUPO05/fiap-docs)**
 
-## Como funciona
+## Tecnologias e requisitos
 
-- `POST /auth/customer`: valida e normaliza o CPF, consulta um cliente ACTIVE
-  no RDS privado e emite JWT RS256 com `roles=[CUSTOMER]` e `customerId`.
-  O CPF nao e incluido no token.
-- `POST /auth/login`: confere e-mail e senha bcrypt e emite JWT RS256.
-- `GET /.well-known/openid-configuration` e `GET /.well-known/jwks.json`:
-  publicam metadados e somente a chave publica para validacao dos tokens.
-- O API Gateway valida emissor, audiencia e assinatura nas rotas protegidas
-  antes de encaminhar ao backend pelo VPC Link e pelo ALB interno compartilhado.
-- A API Java aplica a autorizacao de negocio, incluindo isolamento das ordens
-  de servico de cada cliente.
+Python 3.12, boto3, PyJWT, PostgreSQL, AWS Lambda, API Gateway, SES e Terraform 1.13+. Docker com Compose v2 permite testar o runtime local. AWS CLI autenticado é necessário somente para o bootstrap administrativo; o CI usa OIDC.
 
-Cada Lambda le apenas o segredo de banco e a chave de assinatura de seu ambiente.
-As senhas e chaves privadas ficam no Secrets Manager. A conexao PostgreSQL usa TLS.
-CloudWatch tem retencao de 14 dias para funcoes e API Gateways.
+## Arquitetura deste componente
 
-`codeemail` preserva o adaptador SMTP e seus testes. O deploy atual usa
-`MAIL_TIPE=NONE` na API enquanto as notificacoes reais estiverem em validacao.
-Nenhum teste desta configuracao envia e-mails reais.
-
-## Contribuir e testar
-
-```powershell
-python -m pip install -r requirements.txt coverage
-python -m unittest discover -s tests -v
-python -m coverage run --source=codetoken,codeemail -m unittest discover -s tests
-python -m coverage report --fail-under=90
-python -m unittest discover -s .github/scripts -p 'test_*.py' -v
+```mermaid
+flowchart LR
+    Cliente --> Gateway[API Gateway]
+    Gateway --> Auth[Lambda de autenticacao]
+    Auth --> RDS[(RDS: cliente e status)]
+    Auth --> SM[Secrets Manager: chave RSA]
+    Gateway --> JWT[Authorizer JWT / rotas protegidas]
+    API[API Java apos commit da OS] --> Email[Lambda de email por ambiente]
+    Email --> SES[SES: remetente verificado]
+    Auth --> Logs[CloudWatch Logs]
+    Email --> Logs
 ```
 
-Use Python 3.12. Os testes HTTP adicionais usam `API_GATEWAY_URL`,
-`E2E_CUSTOMER_CPF` e `E2E_INACTIVE_CUSTOMER_CPF` quando houver dados de teste
-controlados no ambiente; sem eles, esses dois testes ficam explicitamente skipped.
+## Testar localmente
 
-## Provisionar por CLI (administracao)
-
-O EKS/RDS precisam estar provisionados pelos repositorios `fiap-k8s` e
-`fiap-database`. Gere as dependencias Linux com a imagem oficial da Lambda:
+Na raiz deste repositório, em PowerShell:
 
 ```powershell
-docker run --rm --entrypoint /bin/sh --mount "type=bind,source=$((Get-Location).Path),target=/work" public.ecr.aws/lambda/python:3.12 -c 'python -m pip install --no-cache-dir --no-compile --target /work/build/token-package -r /work/requirements.txt && cp /work/codetoken/main.py /work/build/token-package/main.py'
-$env:AWS_PROFILE = '<perfil-administrador>'
-terraform -chdir=infra/managed init -backend-config=backend.hcl
-terraform -chdir=infra/managed plan
-terraform -chdir=infra/managed apply
-terraform -chdir=infra/managed output -json runtime_config
+python -m venv .venv
+./.venv/Scripts/python.exe -m pip install -r requirements-dev.txt
+./.venv/Scripts/python.exe -m coverage run --source=codetoken,codeemail -m unittest discover -s tests -v
+./.venv/Scripts/python.exe -m coverage report --fail-under=90
+docker compose -p fiap-notifications-local -f compose.notifications.yaml up --build -d
+python .github/scripts/local_notification_smoke.py
 ```
 
-No primeiro bootstrap, antes de existir o ALB, aplique com
-`-var=enable_backend_proxy=false`. Inicialize as chaves pelo workflow manual em
-uma branch autorizada e depois aplique novamente com o valor padrao `true`.
-O resultado `runtime_config` tambem configura a variavel de repositorio
-`FIAP_RUNTIME_CONFIG` da aplicacao, sem conter credenciais.
+O teste Docker chama o runtime Lambda em `http://127.0.0.1:19000` e confirma HTML, texto e correlação no [MailHog local](http://127.0.0.1:18025). Nenhum e-mail sai para a internet. Para encerrar: `docker compose -p fiap-notifications-local -f compose.notifications.yaml down`. No Linux/macOS, o Python do venv está em `.venv/bin/python`.
 
-## CI/CD e chaves
+A Lambda de e-mail aceita `{to, subject, body, html, correlationId}`. `operation=health` verifica o remetente SES sem enviar e-mail. SMTP fica restrito a `ENVIRONMENT=local`; a AWS usa SES e IAM, sem senha SMTP. Os testes de autenticação externos exigem ambiente provisionado e seus dados; sem eles, ficam explicitamente ignorados.
 
-O fluxo e `feature/* -> develop -> release/vX.Y.Z -> prod -> main`. O mesmo
-workflow valida build, testes, cobertura, seguranca e Terraform. Os merges dos
-ambientes disparam o deploy por OIDC e a promocao seguinte depende de seu sucesso.
-`prod -> main` segue como merge simples.
+## Deploy e ambientes
 
-O job manual `Bootstrap signing keys` importa a chave de producao do secret
-`JWT_PRIVATE_KEY` ja configurado no GitHub e cria chaves independentes para
-desenvolvimento e homologacao. Uma chave desses ambientes ja inicializada e
-preservada em novas execucoes. Valores privados nao sao impressos nem incluidos
-no Git ou no estado Terraform.
+O fluxo é `feature/* → develop → release/vX.Y.Z → prod → main`. Após o push da feature e o sucesso da CI, o PR é aberto automaticamente; os merges são manuais. Os próximos PRs são gerados após a promoção aprovada. `develop`, `release/*` e `prod` publicam no ambiente correspondente quando a infraestrutura está `active`; `prod → main` apenas consolida a versão.
 
-No deploy normal, o papel OIDC e limitado a funcao do ambiente da branch.
-A esteira publica uma versao Lambda, testa JWKS, validacao de CPF e acesso ao
-banco, e promove o alias `live`. Se a verificacao HTTP final falhar, restaura o
-alias anterior. Terraform gerencia a infraestrutura; a esteira gerencia codigo
-e versao do alias. Integrantes nao precisam de chaves AWS locais para contribuir.
+Em `destroyed`/`destroying`, deploys e promoções ficam bloqueados. Em `maintenance`, a CI permite validar e promover código, mantendo os deploys bloqueados. O bootstrap administrativo usa AWS CLI; a operação diária do CI usa OIDC e não exige credenciais AWS de cada integrante.
 
+A CI inclui testes, cobertura mínima de 90%, runtime Docker com MailHog, segurança e validação Terraform. No deploy, o código é empacotado para Linux, publicado em versões e promovido ao alias `live` somente após os checks. A função de e-mail permanece no alias anterior quando o healthcheck SES falha.
 
-O merge em prod tambem aplica `infra/managed` antes de publicar o codigo, usando
-`fiap-gh-terraform-fiap-lambda`, restrito a essa branch. Esse modulo gerencia os
-tres API Gateways e a configuracao das funcoes; seus estados e recursos sao
-compartilhados. Codigo e alias continuam promovidos por ambiente.
-Veja [o fluxo completo](docs/CI-CD.md).
+Antes do primeiro provisionamento, configure `FIAP_NOTIFICATION_SENDER` com um endereço autorizado e verificado no SES de `sa-east-1`. No sandbox SES, use destinatários verificados ou o simulador da AWS. O bootstrap e a verificação do endereço são preparados pelo script administrativo do `fiap-k8s`.
+
+## API e URLs dos ambientes
+
+URLs verificadas em 28/10/2026, com saúde `UP` e regressivo das 53 operações OpenAPI aprovado em cada ambiente:
+
+| Ambiente | API | Swagger |
+| --- | --- | --- |
+| Develop | [API](https://ku4upcna7k.execute-api.sa-east-1.amazonaws.com) | [Swagger](https://ku4upcna7k.execute-api.sa-east-1.amazonaws.com/swagger-ui/index.html) |
+| Homologação | [API](https://ryzzw5lm77.execute-api.sa-east-1.amazonaws.com) | [Swagger](https://ryzzw5lm77.execute-api.sa-east-1.amazonaws.com/swagger-ui/index.html) |
+| Produção | [API](https://khha99ce86.execute-api.sa-east-1.amazonaws.com) | [Swagger](https://khha99ce86.execute-api.sa-east-1.amazonaws.com/swagger-ui/index.html) |
+
+Uma reconstrução pode gerar novos endereços. A configuração usada pela CI é consultada com:
+
+```powershell
+gh api repos/FIAP-GRUPO05/fiap-lambda/actions/variables/FIAP_RUNTIME_CONFIG --jq .value
+```
+
+Em cada `api_url`, o Swagger fica em `/swagger-ui/index.html`, o OpenAPI em `/v3/api-docs` e a saúde em `/actuator/health`. A autenticação CPF usa `POST /auth/customer`; operações protegidas exigem `Authorization: Bearer <JWT>`.
+
+## Membros da equipe
+
+<table>
+  <tr>
+    <td align="center" width="160">
+      <a href="https://www.linkedin.com/in/wesslima/" title="Wesley Lima">
+        <img src="https://media.licdn.com/dms/image/v2/D4D03AQG__sMSpl_SEg/profile-displayphoto-scale_400_400/B4DaEHvVltHsAg-/0/1791131212617?e=1794441600&amp;v=beta&amp;t=VPPE-aIk2CNR6rhd3yPIdsPjOuVyl7gdsCxP6AlAlpg" width="100" height="100" alt="Foto de Wesley Lima"><br>
+        <sub><b>Wesley Lima</b></sub>
+      </a><br><sub>Backend Engineer</sub>
+    </td>
+    <td align="center" width="160">
+      <a href="https://www.linkedin.com/in/tim-morgenstern-4581911b1/" title="Tim Morgenstern">
+        <img src="https://media.licdn.com/dms/image/v2/C4E03AQG57Du9tsCS5A/profile-displayphoto-shrink_400_400/profile-displayphoto-shrink_400_400/0/1643980434981?e=1794441600&amp;v=beta&amp;t=6fVFPP0UXkaUU6K77-XJ3fPtGR2YvE1KRoRn9ze-Vog" width="100" height="100" alt="Foto de Tim Morgenstern"><br>
+        <sub><b>Tim Morgenstern</b></sub>
+      </a><br><sub>Backend Engineer</sub>
+    </td>
+    <td align="center" width="160">
+      <a href="https://www.linkedin.com/in/matheus-pitas-baptista/" title="Matheus Pitas Baptista">
+        <img src="https://media.licdn.com/dms/image/v2/D4D03AQHFS4VJk5WteA/profile-displayphoto-scale_400_400/B4DZv_LwbmHYAg-/0/1769512832179?e=1794441600&amp;v=beta&amp;t=gaI3wzS0F5BnXd5z0V9sS90uFcyxOLiK0vgWPnzMOJg" width="100" height="100" alt="Foto de Matheus Pitas Baptista"><br>
+        <sub><b>Matheus Pitas Baptista</b></sub>
+      </a><br><sub>Backend Engineer</sub>
+    </td>
+  </tr>
+</table>

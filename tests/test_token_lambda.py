@@ -2,7 +2,6 @@ import contextlib
 import io
 import json
 import os
-import sys
 import unittest
 from urllib.error import HTTPError
 from urllib.request import Request, urlopen
@@ -14,9 +13,8 @@ import jwt
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric import rsa
 
-sys.modules.setdefault("boto3", MagicMock())
-
-from codetoken import main
+with patch("boto3.client", side_effect=lambda *args, **kwargs: MagicMock()):
+    from codetoken import main
 
 
 class CustomerCpfValidationTest(unittest.TestCase):

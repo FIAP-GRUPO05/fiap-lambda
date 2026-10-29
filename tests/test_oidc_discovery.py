@@ -1,6 +1,5 @@
 import json
 import os
-import sys
 import unittest
 from unittest.mock import MagicMock, patch
 
@@ -8,8 +7,8 @@ import jwt
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric import rsa
 
-sys.modules.setdefault("boto3", MagicMock())
-from codetoken import main
+with patch("boto3.client", side_effect=lambda *args, **kwargs: MagicMock()):
+    from codetoken import main
 
 
 class OidcDiscoveryTest(unittest.TestCase):
