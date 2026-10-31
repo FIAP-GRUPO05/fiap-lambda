@@ -48,8 +48,7 @@ locals {
       "GET /", "POST /auth/register-account", "GET /actuator/health",
       "GET /actuator/health/{proxy+}", "GET /swagger-ui.html", "GET /swagger-ui/{proxy+}",
       "GET /v3/api-docs", "GET /v3/api-docs/{proxy+}",
-      "GET /service-orders/{id}/budget", "GET /service-orders/{id}/budget/decision",
-      "POST /service-orders/{id}/budget/approve", "POST /service-orders/{id}/budget/reject"
+      "GET /service-orders/{id}/budget/decision"
     ])) : "${item[0]}:${item[1]}" => { environment = item[0], route = item[1] }
   }
 }
