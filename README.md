@@ -52,7 +52,7 @@ Antes do primeiro provisionamento, configure `FIAP_NOTIFICATION_SENDER` com um e
 
 ## API e URLs dos ambientes
 
-URLs verificadas em 28/10/2026, com saúde `UP` e regressivo das 53 operações OpenAPI aprovado em cada ambiente:
+URLs verificadas em 28/10/2026, com saúde `UP`. O regressivo HTTPS verifica todas as operações do OpenAPI publicado em cada ambiente:
 
 | Ambiente | API | Swagger |
 | --- | --- | --- |
@@ -67,6 +67,8 @@ gh api repos/FIAP-GRUPO05/fiap-lambda/actions/variables/FIAP_RUNTIME_CONFIG --jq
 ```
 
 Em cada `api_url`, o Swagger fica em `/swagger-ui/index.html`, o OpenAPI em `/v3/api-docs` e a saúde em `/actuator/health`. A autenticação CPF usa `POST /auth/customer`; operações protegidas exigem `Authorization: Bearer <JWT>`.
+
+No orçamento, somente `GET /service-orders/{id}/budget/decision` é público e apresenta a identificação por CPF, sem dados da OS. Consulta JSON, visualização autenticada, aprovação e recusa passam pelo authorizer JWT; a aplicação valida a titularidade do cliente antes de ler ou alterar o orçamento.
 
 ## Membros da equipe
 
