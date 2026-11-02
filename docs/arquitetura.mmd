@@ -1,0 +1,10 @@
+flowchart LR
+    Cliente --> Gateway[API Gateway]
+    Gateway --> Auth[Lambda de autenticacao]
+    Auth --> RDS[(RDS: cliente e status)]
+    Auth --> SM[Secrets Manager: chave RSA]
+    Gateway --> JWT[Authorizer JWT / rotas protegidas]
+    API[API Java apos commit da OS] --> Email[Lambda de email por ambiente]
+    Email --> SES[SES: remetente verificado]
+    Auth --> Logs[CloudWatch Logs]
+    Email --> Logs

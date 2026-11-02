@@ -140,7 +140,11 @@ ausencia de sinal por 15 minutos. O CI confirma o recebimento dessas amostras.
 Os incidentes ficam em Alerts > Issues; a entrega por e-mail/Slack depende de
 definir o destino do time. O monitor verifica disponibilidade, sem executar uma
 jornada autenticada de negocio; essa jornada pertence ao regressivo do deploy.
-E-mail permanece `MAIL_TIPE=NONE`; os testes nao enviam mensagens reais.
+Nos ambientes AWS, o deploy da API feito pelo fiap-k8s define `MAIL_TIPE=LAMBDA`
+e `NOTIFICATIONS_LAMBDA_FUNCTION=fiap-email-<env>:live`; a API invoca a Lambda de
+e-mail, que envia pelo SES. Os testes de CI deste repositório usam o runtime Lambda
+local com MailHog e não enviam mensagens reais. As Lambdas deste repositório não
+têm integração com New Relic; seus logs ficam no CloudWatch (ver README).
 Registros sinteticos de ordens de servico usados na regressao ficam identificados
 pelo UUID da execucao e preservam o historico, inclusive em prod.
 
